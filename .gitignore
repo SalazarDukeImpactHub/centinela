@@ -17,3 +17,7 @@ models/
 # SO / editor
 .DS_Store
 Thumbs.db
+
+# Voz de Piper: 63 MB descargables con
+#   python -m piper.download_voices es_MX-claude-high --data-dir models/piper
+models/piper/
