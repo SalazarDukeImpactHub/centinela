@@ -76,12 +76,24 @@ async function comprobarSalud() {
   try {
     const r = await fetch('/api/salud');
     const d = await r.json();
-    const listo = d.indice && d.sintetizador && d.modelo_disponible;
+    const listo = d.indice && d.sintetizador && d.modelo_disponible && d.transcripcion_lista;
+    // Se nombra QUÉ falta. "Servicio incompleto" no le sirve a nadie a mitad de
+    // una demostración; "falta GROQ_API_KEY" se arregla en veinte segundos.
     $('salud').textContent = listo
       ? `${d.fragmentos.toLocaleString('es')} fragmentos · ${d.modelo}`
-      : 'servicio incompleto';
+      : !d.transcripcion_lista
+        ? `sin transcripción · falta ${d.faltantes.join(', ')}`
+        : !d.modelo_disponible
+          ? 'modelo local no responde · ¿está corriendo ollama?'
+          : 'servicio incompleto';
     $('dotSalud').style.background = listo ? 'var(--ok)' : 'var(--crit)';
     $('mModelo').textContent = `${d.modelo} · local`;
+    // Sin transcripción la llamada no puede avanzar: se bloquea antes de empezar.
+    if (!d.transcripcion_lista) {
+      $('btnIniciar').disabled = true;
+      $('btnIniciar').style.filter = 'grayscale(1)';
+      $('btnIniciar').title = `Falta ${d.faltantes.join(', ')} en el archivo .env`;
+    }
   } catch {
     $('salud').textContent = 'sin conexión';
     $('dotSalud').style.background = 'var(--crit)';
@@ -174,7 +186,16 @@ async function enviarTurno() {
     const r = await fetch(`/api/llamada/${llamadaId}/turno`, { method: 'POST', body: forma });
     if (!r.ok) {
       const detalle = await r.json().catch(() => ({ detail: r.statusText }));
-      estado('Escuchando', detalle.detail || 'no se entendió el audio', 'var(--accent)');
+      const mensaje = detalle.detail || `error ${r.status}`;
+      // 422 es del audio y se reintenta hablando de nuevo. Cualquier otro código
+      // es del servicio: se muestra en rojo y en la transcripción, porque un
+      // fallo silencioso hace creer que la conversación simplemente no avanza.
+      if (r.status === 422) {
+        estado('Escuchando', mensaje, 'var(--accent)');
+      } else {
+        estado('Error del servicio', mensaje, 'var(--crit)');
+        avisoEnLlamada(mensaje);
+      }
       return;
     }
     const d = await r.json();
@@ -182,8 +203,24 @@ async function enviarTurno() {
     reproducir(d.audio_wav_base64);
     if (d.finalizada) finalizar();
   } catch (e) {
-    estado('Error', e.message, 'var(--crit)');
+    estado('Error del servicio', e.message, 'var(--crit)');
+    avisoEnLlamada(e.message);
   }
+}
+
+/* Un fallo del servicio se escribe en la transcripción, donde el operador está
+ * mirando. Dejarlo solo en la etiqueta de estado hacía que el problema pasara
+ * inadvertido: se oía el saludo y después nada. */
+function avisoEnLlamada(mensaje) {
+  const aviso = document.createElement('div');
+  aviso.className = 'dcin';
+  aviso.style.cssText =
+    'margin-bottom:12px;max-width:760px;border:1px solid var(--crit);background:var(--crit-bg);border-radius:var(--r2);padding:11px 13px';
+  aviso.innerHTML =
+    `<div style="font-size:13px;font-weight:700;color:var(--crit-t)">El turno no se pudo procesar</div>
+     <div style="margin-top:5px;font-size:12.5px;color:var(--text)">${esc(mensaje)}</div>`;
+  $('tr').appendChild(aviso);
+  $('tr').scrollTop = $('tr').scrollHeight;
 }
 
 $('btnColgar').onclick = async () => {

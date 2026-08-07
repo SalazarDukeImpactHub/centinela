@@ -29,6 +29,7 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from src import config
 from src.clinico.escalamiento import Semaforo, evaluar
 from src.conversacion.turno import Conversacion, EstadoLlamada
 from src.modelo.cliente import MODELO, ClienteLocal
@@ -38,7 +39,7 @@ from src.rag.extract import extraer as extraer_pdf
 from src.rag.grounding import verificar
 from src.rag.index import MODELO_EMBEDDINGS, IndiceClinico
 from src.rag.saneamiento import contiene_inyeccion
-from src.voz.stt import transcribir
+from src.voz.stt import ErrorTranscripcion, transcribir
 from src.voz.tts import Sintetizador
 
 RAIZ = Path(__file__).resolve().parents[2]
@@ -92,6 +93,18 @@ async def arrancar() -> None:
     """
     LOGS.mkdir(exist_ok=True)
     SUBIDAS.mkdir(exist_ok=True)
+
+    # Las credenciales se cargan ACÁ y no en cada script. Sin esto, el servidor
+    # arrancaba sano y solo fallaba al primer turno de voz, con un 500 y la
+    # interfaz muda: el saludo se escuchaba y la conversación no avanzaba nunca.
+    archivo = config.cargar()
+    ausentes = config.faltantes()
+    if ausentes:
+        for clave, consecuencia in ausentes.items():
+            print(f"  FALTA {clave} — {consecuencia}")
+        print(f"  Definila en {config.ENV} o en el entorno del proceso.")
+    elif archivo:
+        print(f"  Credenciales cargadas desde {archivo}")
 
     SERVICIOS.indice = IndiceClinico(INDICE)
     SERVICIOS.cliente = ClienteLocal()
@@ -288,11 +301,16 @@ async def turno(llamada_id: str, audio: UploadFile) -> JSONResponse:
         transcripcion = await bucle.run_in_executor(None, transcribir, ruta_audio)
         metrica.registrar_etapa("stt", (time.perf_counter() - t0) * 1000)
         sesion.segundos_audio += transcripcion.segundos_audio
+    except ErrorTranscripcion as exc:
+        # Un fallo de transcripción es de configuración o de red, no del paciente.
+        # Devolverlo como 503 con el detalle evita el 500 mudo que hacía parecer
+        # que la conversación simplemente no arrancaba.
+        raise HTTPException(503, f"transcripción no disponible: {exc}") from exc
     finally:
         ruta_audio.unlink(missing_ok=True)
 
     if not transcripcion.texto:
-        raise HTTPException(422, "no se entendió el audio")
+        raise HTTPException(422, "no se entendió el audio, intente de nuevo")
 
     # Decisión: código puro, sin esperar al modelo.
     t1 = time.perf_counter()
@@ -520,6 +538,7 @@ async def olvidar_documento(doc_id: str) -> JSONResponse:
 @app.get("/api/salud")
 async def salud() -> JSONResponse:
     """Diagnóstico de arranque. Sirve al jurado para confirmar que todo está en pie."""
+    ausentes = config.faltantes()
     return JSONResponse(
         {
             "indice": SERVICIOS.indice is not None,
@@ -529,6 +548,11 @@ async def salud() -> JSONResponse:
             "modelo_disponible": SERVICIOS.cliente.disponible()
             if SERVICIOS.cliente
             else False,
+            # La transcripción se verifica ACÁ, al levantar, y no al primer turno.
+            # Que el saludo suene no prueba que la conversación pueda avanzar: el
+            # saludo es síntesis local y la transcripción necesita credencial.
+            "transcripcion_lista": not ausentes,
+            "faltantes": list(ausentes),
         }
     )
 
