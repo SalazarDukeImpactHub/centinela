@@ -38,7 +38,10 @@ import threading
 from dataclasses import dataclass, field
 from enum import Enum
 
+from typing import Callable, Protocol
+
 from src.clinico import alarmas, fiebre
+from src.conversacion import preguntas
 from src.clinico.escalamiento import CuadroClinico, Decision, Semaforo, evaluar
 from src.clinico.extraccion import extraer
 from src.modelo.cliente import ClienteLocal
@@ -141,6 +144,29 @@ ACUSES = {
 # de seguir preguntando: pasar de largo suena a formulario.
 ACUSE_PREOCUPACION = "Entiendo su preocupación, y hace bien en contármelo."
 
+# Cuando el corpus no cubre la pregunta del paciente. Declarar el límite y
+# derivar es exactamente la conducta que el criterio de 20 puntos evalúa.
+SIN_RESPUESTA = (
+    "Esa pregunta no la puedo responder con la documentación que manejo, y "
+    "prefiero no adivinar. Se la dejo anotada al equipo de salud para que se la "
+    "resuelvan bien."
+)
+
+# Saludo a un cuidador que toma la palabra. Su relato vale: muchas señales
+# —desorientación, por ejemplo— las ve el cuidador antes que el paciente.
+ACUSE_TERCERO = "Claro que sí, le agradezco que me cuente cómo lo ha visto."
+
+
+class Consultor(Protocol):
+    """Responde una pregunta del paciente contra el corpus, o declara el límite.
+
+    Devuelve el texto a decir (ya con cita si la hay) o None si no hay sustento.
+    La implementación real vive en la API, que conoce el índice; acá solo se
+    define el contrato para que la máquina de turnos sea comprobable sin RAG.
+    """
+
+    def __call__(self, pregunta: str) -> str | None: ...
+
 
 @dataclass
 class EstadoLlamada:
@@ -189,9 +215,15 @@ class RespuestaTurno:
 class Conversacion:
     """Máquina de turnos. El modelo nunca está en el camino crítico."""
 
-    def __init__(self, cliente: ClienteLocal, estado: EstadoLlamada) -> None:
+    def __init__(
+        self,
+        cliente: ClienteLocal,
+        estado: EstadoLlamada,
+        consultor: Consultor | None = None,
+    ) -> None:
         self.cliente = cliente
         self.estado = estado
+        self.consultor = consultor
         self._extraccion: threading.Thread | None = None
         self._lock = threading.Lock()
 
@@ -274,6 +306,20 @@ class Conversacion:
         with self._lock:
             decision = evaluar(self.estado.cuadro)
 
+        # 3b. Si el paciente preguntó algo, se le responde ANTES de seguir con el
+        #     triaje. Medido en el dataset: el 45 % de los turnos de la capa
+        #     ruidosa traen una pregunta, y un agente que las ignora suena a
+        #     formulario con voz. La respuesta sale del corpus con cita, o es el
+        #     límite declarado — nunca una improvisación.
+        #     Un tercero que se presenta recibe su acuse: su relato vale, y las
+        #     alarmas ya barrieron su texto igual que el del paciente.
+        prefijo = ""
+        if preguntas.habla_un_tercero(texto_paciente):
+            prefijo = ACUSE_TERCERO + " "
+        elif not decision.escala and preguntas.contiene_pregunta(texto_paciente):
+            respuesta_corpus = self.consultor(texto_paciente) if self.consultor else None
+            prefijo = (respuesta_corpus or SIN_RESPUESTA) + " "
+
         if decision.escala:
             self.estado.cerrada = True
             self.estado.transcripcion.append(("agente", ESCALAMIENTO))
@@ -294,7 +340,7 @@ class Conversacion:
             if pendiente is not None:
                 self.estado.datos_pedidos.add(pendiente)
                 self.estado.foco_actual = pendiente
-                texto = f"{ACUSE_PREOCUPACION} {PEDIDOS_DE_DATO[pendiente]}"
+                texto = f"{prefijo}{ACUSE_PREOCUPACION} {PEDIDOS_DE_DATO[pendiente]}"
                 self.estado.transcripcion.append(("agente", texto))
                 return RespuestaTurno(
                     texto=texto,
@@ -315,7 +361,7 @@ class Conversacion:
             self.estado.preguntados.add(foco)
             self.estado.foco_actual = foco
 
-        texto = f"{ACUSES[decision.semaforo]} {pregunta}"
+        texto = f"{prefijo}{ACUSES[decision.semaforo]} {pregunta}"
         self.estado.transcripcion.append(("agente", texto))
         return RespuestaTurno(
             texto=texto,

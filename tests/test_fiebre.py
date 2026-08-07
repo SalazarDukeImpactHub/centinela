@@ -66,6 +66,23 @@ class TestDeteccionEnCodigo:
     def test_no_confunde_otros_sintomas_con_fiebre(self, texto: str):
         assert not menciona_fiebre(texto)
 
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "No, fiebre no he tenido",
+            "no he tenido fiebre, gracias a Dios",
+            "fiebre nada, doctora",
+            "no me ha dado calentura",
+            "tampoco tuve escalofríos",
+            "sin fiebre, eso sí",
+        ],
+    )
+    def test_la_negacion_no_dispara_el_pedido_de_cifra(self, texto: str):
+        """El fallo real: 'fiebre no he tenido' pedía la cifra igual, porque el
+        detector veía la palabra y no veía el 'no'."""
+        assert not menciona_fiebre(texto)
+        assert not refiere_fiebre_sin_cifra(texto)
+
 
 class TestEscalamiento:
     def test_fiebre_referida_sin_medir_no_es_verde(self):

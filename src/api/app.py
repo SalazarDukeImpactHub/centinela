@@ -235,6 +235,48 @@ def _estado_publico(sesion: SesionLlamada) -> dict:
 # -- Llamada (G4) ----------------------------------------------------------------
 
 
+def _consultor_corpus(sesion_ref: list) -> object:
+    """Consultor de preguntas del paciente contra el corpus.
+
+    Responde con una CITA TEXTUAL del fragmento mejor sustentado — sin pasar por
+    el modelo de lenguaje. Es deliberado dos veces: no agrega latencia (el modelo
+    local tarda ~17 s) y no puede alucinar, porque no genera — cita. La rúbrica
+    exige que cada afirmación clínica resista verificación contra la fuente.
+    """
+
+    def consultar(pregunta: str) -> str | None:
+        if SERVICIOS.indice is None:
+            return None
+        veredicto = verificar(SERVICIOS.indice, pregunta, escenario=ESCENARIO_DEMO)
+        # El estado de grounding queda registrado para la consola, responda o no.
+        if sesion_ref:
+            sesion = sesion_ref[0]
+            sesion.grounding = {
+                "permitido": veredicto.permitido,
+                "motivo": veredicto.motivo,
+                "capa": _capa_de(veredicto.motivo),
+            }
+            sesion.citas = [
+                {
+                    "id": f.chunk_id,
+                    "puntaje": round(f.similitud, 3),
+                    "fragmento": f.texto[:180],
+                    "fuente": f.cita(),
+                }
+                for f in veredicto.fragmentos
+            ]
+        if not veredicto.permitido or not veredicto.fragmentos:
+            return None  # la máquina de turnos dirá el límite declarado
+
+        mejor = veredicto.fragmentos[0]
+        # Solo la primera oración completa: un fragmento de 1.200 caracteres
+        # leído por voz es un monólogo, no una respuesta.
+        oracion = mejor.texto.split(". ")[0].strip().rstrip(".")
+        return f"Le cuento lo que dice la guía: {oracion}. Eso está en {mejor.cita()}."
+
+    return consultar
+
+
 @app.post("/api/llamada")
 async def iniciar_llamada() -> JSONResponse:
     """Crea una llamada y devuelve el saludo del agente ya sintetizado."""
@@ -242,14 +284,18 @@ async def iniciar_llamada() -> JSONResponse:
         raise HTTPException(503, "servicio no inicializado")
 
     llamada_id = uuid.uuid4().hex[:12]
+    sesion_ref: list = []
     conversacion = Conversacion(
-        SERVICIOS.cliente, EstadoLlamada(escenario=ESCENARIO_DEMO)
+        SERVICIOS.cliente,
+        EstadoLlamada(escenario=ESCENARIO_DEMO),
+        consultor=_consultor_corpus(sesion_ref),
     )
     sesion = SesionLlamada(
         id=llamada_id,
         conversacion=conversacion,
         registro=RegistroLlamada(llamada_id, LOGS / f"llamada-{llamada_id}.jsonl"),
     )
+    sesion_ref.append(sesion)  # el consultor registra grounding y citas acá
     SERVICIOS.llamadas[llamada_id] = sesion
 
     respuesta = conversacion.abrir()
@@ -317,26 +363,11 @@ async def turno(llamada_id: str, audio: UploadFile) -> JSONResponse:
     respuesta = sesion.conversacion.responder(transcripcion.texto)
     metrica.registrar_etapa("decision", (time.perf_counter() - t1) * 1000)
 
-    # Grounding solo cuando el paciente pregunta algo, no cuando responde.
-    if "?" in transcripcion.texto or "¿" in transcripcion.texto:
-        veredicto = verificar(
-            SERVICIOS.indice, transcripcion.texto, escenario=ESCENARIO_DEMO
-        )
+    # El grounding de preguntas lo maneja el consultor dentro de la máquina de
+    # turnos: la detección no depende de un '?' —la transcripción de voz no los
+    # trae de forma confiable— sino de las formas interrogativas reales.
+    if sesion.grounding is not None:
         metrica.consultas_rag += 1
-        sesion.grounding = {
-            "permitido": veredicto.permitido,
-            "motivo": veredicto.motivo,
-            "capa": _capa_de(veredicto.motivo),
-        }
-        sesion.citas = [
-            {
-                "id": f.chunk_id,
-                "puntaje": round(f.similitud, 3),
-                "fragmento": f.texto[:180],
-                "fuente": f.cita(),
-            }
-            for f in veredicto.fragmentos
-        ]
 
     texto_agente = respuesta.texto
     t2 = time.perf_counter()

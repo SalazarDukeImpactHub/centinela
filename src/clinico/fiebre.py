@@ -46,8 +46,20 @@ CIFRAS_TEMPERATURA = [
     r"\bgrados?\b.*\b\d",
 ]
 
+# Negaciones de la sensación febril. Sin esto, "fiebre no he tenido" disparaba
+# el pedido de cifra: el detector veía la palabra y no veía el "no". El paciente
+# colombiano niega en ambos órdenes — "no he tenido fiebre" y "fiebre no he
+# tenido" — así que se cubren los dos.
+NEGACIONES = [
+    r"\b(?:no|tampoco|nada de|sin|ni)\b[^.,;]{0,40}?"
+    r"(?:fiebre|calentura|escalofri\w*|destemplad\w*|afiebrad\w*)",
+    r"(?:fiebre|calentura|escalofri\w*|destemplad\w*|afiebrad\w*)"
+    r"[^.,;]{0,30}?\b(?:no|nada|ninguna?|tampoco)\b",
+]
+
 _MENCIONES = [re.compile(p) for p in MENCIONES_FIEBRE]
 _CIFRAS = [re.compile(p) for p in CIFRAS_TEMPERATURA]
+_NEGACIONES = [re.compile(p) for p in NEGACIONES]
 
 
 def _normalizar(texto: str) -> str:
@@ -55,9 +67,21 @@ def _normalizar(texto: str) -> str:
     return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn")
 
 
-def menciona_fiebre(texto: str) -> bool:
-    """El paciente describe sensación febril, con la palabra que sea."""
+def niega_fiebre(texto: str) -> bool:
+    """El paciente niega la sensación febril, en cualquiera de los dos órdenes."""
     normalizado = _normalizar(texto)
+    return any(p.search(normalizado) for p in _NEGACIONES)
+
+
+def menciona_fiebre(texto: str) -> bool:
+    """El paciente describe sensación febril, con la palabra que sea.
+
+    Una mención negada no es una mención: "fiebre no he tenido" habla de fiebre
+    para decir que no la hay.
+    """
+    normalizado = _normalizar(texto)
+    if any(p.search(normalizado) for p in _NEGACIONES):
+        return False
     return any(p.search(normalizado) for p in _MENCIONES)
 
 
