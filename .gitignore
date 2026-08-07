@@ -1,0 +1,19 @@
+# Entornos y secretos
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Datos locales generados
+chroma_data/
+*.log
+logs/
+
+# Modelos descargados
+models/
+*.onnx
+
+# SO / editor
+.DS_Store
+Thumbs.db
