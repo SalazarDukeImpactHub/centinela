@@ -5,8 +5,8 @@ venv/
 __pycache__/
 *.pyc
 
-# Datos locales generados
-chroma_data/
+# El índice vectorial SÍ se versiona: G2 exige levantamiento en ≤15 minutos y
+# regenerarlo cuesta ~9 min de CPU. Viaja pre-construido a propósito.
 *.log
 logs/
 
