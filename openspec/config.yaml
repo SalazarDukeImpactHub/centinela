@@ -1,0 +1,68 @@
+# openspec/config.yaml — Agente de Voz Posoperatorio (Tech Sphere 2026)
+schema: spec-driven
+
+context: |
+  Tech stack: Python 3.12 + FastAPI (previsto), ChromaDB + BGE-M3 (RAG),
+  Groq API (Llama 3.1 70B + Whisper Large V3), Ollama (fallback Llama 3.2 3B),
+  Piper (TTS), Docker Compose (empaquetado).
+  Architecture: harness determinista — extracción estructurada por turno,
+  motor de escalamiento en código, compuerta de grounding, log estructurado.
+  Testing: pytest (prerequisito F1 — banco de 160 casos etiquetados).
+  Style: español, conventional commits, commits por unidad de trabajo a main.
+  Dataset: ../techsphere-2026/dataset (kit oficial clonado, solo lectura).
+
+strict_tdd: false  # sin runner aún; evaluar flip a true cuando pytest esté configurado en F1
+
+rules:
+  proposal:
+    - Toda decisión debe ser válida bajo la lista cerrada de modelos permitidos (G3)
+    - Include rollback plan for risky changes
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Los criterios de aceptación del brief §7 son bloqueantes
+    - Recall en casos ROJO priorizado sobre precisión (asimetría clínica)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+    - El diagrama de entrega se genera desde el código real (el jurado lo verifica al azar)
+  tasks:
+    - Group by phase (F0–F5), use hierarchical numbering
+    - Keep tasks completable in one session
+    - Cada fase incluye una tarea de revisión de seguridad documentada en docs/security/
+  apply:
+    - Follow existing code patterns
+    - Commits por unidad de trabajo, directo a main, sin PRs (el jurado evalúa historial)
+    - Instrumentar latencia y tokens desde el primer commit del pipeline de voz
+    tdd: false
+    test_command: "pytest"
+  verify:
+    test_command: "pytest"
+    build_command: "docker compose build"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
+
+testing:
+  strict_tdd: false
+  runner: none  # pytest planificado — declarado prerequisito antes del executor de F1
+  layers:
+    unit: planned (pytest)
+    integration: planned (httpx contra FastAPI + banco de 160 casos del dataset)
+    e2e: manual (levantamiento cronometrado G2 + sesión de voz)
+  coverage: planned (pytest-cov)
+  quality:
+    linter: planned (ruff)
+    type_checker: planned (mypy — opcional por ventana de tiempo)
+    formatter: planned (ruff format)
+
+security:
+  # Requisito de Jennifer: pruebas de ciberseguridad durante el proceso, documentadas
+  review_per_phase: true
+  evidence_dir: docs/security/
+  phases:
+    F1-F2: validación de entradas, sanitización hacia RAG y modelo
+    F4: batería de inyección de prompt ejecutable (penalizada por nombre en la rúbrica)
+    pre-entrega: audit OWASP completo (skill security-audit)
+  accepted_risks:
+    - API key de Groq en el repo público (exigido por G2) — key desechable, revocación post-evaluación
