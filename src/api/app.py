@@ -1,0 +1,543 @@
+"""API de la consola clínica.
+
+Expone las dos superficies que exige el reto:
+
+  Interfaz de llamada (G4)  — iniciar llamada desde el navegador, hablar por
+                              micrófono y escuchar al agente.
+  Consola de conocimiento (G5) — subir documento, verlo procesarse, listarlo y
+                              eliminarlo, con estado visible.
+
+Todo el estado clínico que la interfaz muestra viene del motor determinista, no
+del modelo: el semáforo y sus motivos salen de `escalamiento.evaluar`, las citas
+de la compuerta de grounding, y las métricas del registro estructurado de la
+llamada. La consola no puede mostrar nada que el sistema no pueda sustentar,
+porque la rúbrica contrasta lo mostrado contra los logs.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import io
+import tempfile
+import uuid
+import wave
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from src.clinico.escalamiento import Semaforo, evaluar
+from src.conversacion.turno import Conversacion, EstadoLlamada
+from src.modelo.cliente import MODELO, ClienteLocal
+from src.observabilidad.metricas import RegistroLlamada, costo_estimado
+from src.rag.chunk import fragmentar
+from src.rag.extract import extraer as extraer_pdf
+from src.rag.grounding import verificar
+from src.rag.index import MODELO_EMBEDDINGS, IndiceClinico
+from src.rag.saneamiento import contiene_inyeccion
+from src.voz.stt import transcribir
+from src.voz.tts import Sintetizador
+
+RAIZ = Path(__file__).resolve().parents[2]
+INDICE = RAIZ / "chroma_data"
+LOGS = RAIZ / "logs"
+SUBIDAS = RAIZ / "subidas"
+WEB = RAIZ / "web"
+
+# Escenario por defecto de la demo. En producción vendría del perfil del paciente.
+ESCENARIO_DEMO = "cholecystitis"
+
+app = FastAPI(title="Vela — seguimiento posoperatorio", version="0.1")
+
+
+# -- Estado del proceso ----------------------------------------------------------
+
+
+@dataclass
+class Servicios:
+    """Recursos caros: se cargan una vez al arrancar, nunca por petición."""
+
+    indice: IndiceClinico | None = None
+    sintetizador: Sintetizador | None = None
+    cliente: ClienteLocal | None = None
+    llamadas: dict[str, "SesionLlamada"] = field(default_factory=dict)
+    # Documentos subidos en caliente, con su estado de procesamiento visible.
+    procesando: dict[str, dict] = field(default_factory=dict)
+
+
+SERVICIOS = Servicios()
+
+
+@dataclass
+class SesionLlamada:
+    id: str
+    conversacion: Conversacion
+    registro: RegistroLlamada
+    citas: list[dict] = field(default_factory=list)
+    grounding: dict | None = None
+    segundos_audio: float = 0.0
+    finalizada: bool = False
+
+
+@app.on_event("startup")
+async def arrancar() -> None:
+    """Carga y CALIENTA los modelos antes de aceptar tráfico.
+
+    El calentamiento no es opcional: la primera síntesis de Piper tarda ~28 s
+    contra ~350 ms las siguientes. Sin esto, ese costo lo paga el primer turno de
+    la primera llamada — es decir, la demo ante el jurado.
+    """
+    LOGS.mkdir(exist_ok=True)
+    SUBIDAS.mkdir(exist_ok=True)
+
+    SERVICIOS.indice = IndiceClinico(INDICE)
+    SERVICIOS.cliente = ClienteLocal()
+
+    def preparar() -> None:
+        SERVICIOS.sintetizador = Sintetizador()
+        SERVICIOS.sintetizador.calentar()
+        _ = SERVICIOS.indice.modelo  # carga el modelo de embeddings
+
+    await asyncio.get_running_loop().run_in_executor(None, preparar)
+
+
+# -- Utilidades ------------------------------------------------------------------
+
+
+def _wav_base64(pcm: bytes, frecuencia: int, canales: int, ancho: int) -> str:
+    """Empaqueta PCM crudo como WAV en base64, listo para un <audio> del navegador."""
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as w:
+        w.setnchannels(canales)
+        w.setsampwidth(ancho)
+        w.setframerate(frecuencia)
+        w.writeframes(pcm)
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+def _sintetizar(texto: str) -> tuple[str, float]:
+    """Devuelve (wav en base64, ms hasta el primer audio)."""
+    import time
+
+    tts = SERVICIOS.sintetizador
+    if tts is None:
+        raise HTTPException(503, "sintetizador no disponible")
+
+    inicio = time.perf_counter()
+    fragmentos = list(tts.por_oraciones(texto))
+    primer_audio = (time.perf_counter() - inicio) * 1000
+    if not fragmentos:
+        return "", primer_audio
+
+    pcm = b"".join(f.pcm for f in fragmentos)
+    cabeza = fragmentos[0]
+    return (
+        _wav_base64(pcm, cabeza.frecuencia, cabeza.canales, cabeza.ancho_muestra),
+        primer_audio,
+    )
+
+
+def _estado_publico(sesion: SesionLlamada) -> dict:
+    """Proyección del estado para la interfaz. Todo sale del motor determinista."""
+    estado = sesion.conversacion.estado
+    decision = evaluar(estado.cuadro)
+    cuadro = estado.cuadro
+
+    # "Lo que detectó el agente": hallazgos reales del cuadro clínico, no del modelo.
+    hallazgos: list[dict] = []
+    if cuadro.fiebre_c is not None:
+        hallazgos.append(
+            {
+                "nombre": f"Temperatura {cuadro.fiebre_c} °C",
+                "critico": cuadro.fiebre_c >= 38.0,
+                "detalle": "referida por el paciente",
+            }
+        )
+    if cuadro.dolor_nrs is not None:
+        hallazgos.append(
+            {
+                "nombre": f"Dolor {cuadro.dolor_nrs}/10",
+                "critico": cuadro.dolor_nrs >= 8,
+                "detalle": "escala verbal numérica",
+            }
+        )
+    if cuadro.herida.value != "desconocido":
+        etiquetas = {
+            "normal": "Herida sin hallazgos",
+            "eritema_leve": "Eritema en la herida",
+            "secrecion_purulenta": "Secreción purulenta",
+        }
+        hallazgos.append(
+            {
+                "nombre": etiquetas[cuadro.herida.value],
+                "critico": cuadro.herida.value == "secrecion_purulenta",
+                "detalle": "inspección referida",
+            }
+        )
+    if cuadro.movilidad.value not in ("desconocido", "normal"):
+        hallazgos.append(
+            {
+                "nombre": f"Movilidad {cuadro.movilidad.value.replace('_', ' ')}",
+                "critico": False,
+                "detalle": "referida por el paciente",
+            }
+        )
+    for alarma in cuadro.sintomas_alarma:
+        hallazgos.append(
+            {
+                "nombre": alarma.replace("_", " ").capitalize(),
+                "critico": True,
+                "detalle": "detectado en el habla",
+            }
+        )
+
+    totales = sesion.registro.totales()
+    return {
+        "llamada_id": sesion.id,
+        "finalizada": sesion.finalizada,
+        "semaforo": decision.semaforo.value,
+        "motivos": decision.motivos,
+        "requiere_indagar": decision.requiere_indagar,
+        "faltantes": cuadro.campos_faltantes,
+        "hallazgos": hallazgos,
+        "citas": sesion.citas,
+        "grounding": sesion.grounding,
+        "transcripcion": [
+            {"quien": quien, "texto": texto} for quien, texto in estado.transcripcion
+        ],
+        "metricas": totales,
+        "costo": costo_estimado(
+            int(totales["tokens_entrada"]),
+            int(totales["tokens_salida"]),
+            sesion.segundos_audio,
+        ),
+        "modelo": MODELO,
+        "modelo_ubicacion": "local",
+    }
+
+
+# -- Llamada (G4) ----------------------------------------------------------------
+
+
+@app.post("/api/llamada")
+async def iniciar_llamada() -> JSONResponse:
+    """Crea una llamada y devuelve el saludo del agente ya sintetizado."""
+    if SERVICIOS.cliente is None:
+        raise HTTPException(503, "servicio no inicializado")
+
+    llamada_id = uuid.uuid4().hex[:12]
+    conversacion = Conversacion(
+        SERVICIOS.cliente, EstadoLlamada(escenario=ESCENARIO_DEMO)
+    )
+    sesion = SesionLlamada(
+        id=llamada_id,
+        conversacion=conversacion,
+        registro=RegistroLlamada(llamada_id, LOGS / f"llamada-{llamada_id}.jsonl"),
+    )
+    SERVICIOS.llamadas[llamada_id] = sesion
+
+    respuesta = conversacion.abrir()
+    metrica = sesion.registro.nuevo_turno()
+    audio, primer_audio_ms = _sintetizar(respuesta.texto)
+    metrica.latencia_ms = primer_audio_ms
+    metrica.modelo = MODELO
+    metrica.registrar_etapa("tts", primer_audio_ms)
+    metrica.semaforo = respuesta.decision.semaforo.value
+    sesion.registro.persistir(metrica)
+
+    return JSONResponse(
+        {
+            **_estado_publico(sesion),
+            "texto_agente": respuesta.texto,
+            "audio_wav_base64": audio,
+            "latencia_ms": round(primer_audio_ms, 1),
+        }
+    )
+
+
+@app.post("/api/llamada/{llamada_id}/turno")
+async def turno(llamada_id: str, audio: UploadFile) -> JSONResponse:
+    """Procesa un turno del paciente: audio -> transcripción -> decisión -> voz.
+
+    La latencia que se reporta es la que el paciente percibe: desde que termina de
+    hablar hasta que empieza a sonar el audio del agente.
+    """
+    import time
+
+    sesion = SERVICIOS.llamadas.get(llamada_id)
+    if sesion is None:
+        raise HTTPException(404, "llamada no encontrada")
+    if sesion.finalizada:
+        raise HTTPException(409, "la llamada ya fue finalizada")
+
+    metrica = sesion.registro.nuevo_turno()
+    metrica.modelo = MODELO
+    inicio = time.perf_counter()
+
+    datos = await audio.read()
+    with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
+        tmp.write(datos)
+        ruta_audio = Path(tmp.name)
+
+    try:
+        bucle = asyncio.get_running_loop()
+        t0 = time.perf_counter()
+        transcripcion = await bucle.run_in_executor(None, transcribir, ruta_audio)
+        metrica.registrar_etapa("stt", (time.perf_counter() - t0) * 1000)
+        sesion.segundos_audio += transcripcion.segundos_audio
+    finally:
+        ruta_audio.unlink(missing_ok=True)
+
+    if not transcripcion.texto:
+        raise HTTPException(422, "no se entendió el audio")
+
+    # Decisión: código puro, sin esperar al modelo.
+    t1 = time.perf_counter()
+    respuesta = sesion.conversacion.responder(transcripcion.texto)
+    metrica.registrar_etapa("decision", (time.perf_counter() - t1) * 1000)
+
+    # Grounding solo cuando el paciente pregunta algo, no cuando responde.
+    if "?" in transcripcion.texto or "¿" in transcripcion.texto:
+        veredicto = verificar(
+            SERVICIOS.indice, transcripcion.texto, escenario=ESCENARIO_DEMO
+        )
+        metrica.consultas_rag += 1
+        sesion.grounding = {
+            "permitido": veredicto.permitido,
+            "motivo": veredicto.motivo,
+            "capa": _capa_de(veredicto.motivo),
+        }
+        sesion.citas = [
+            {
+                "id": f.chunk_id,
+                "puntaje": round(f.similitud, 3),
+                "fragmento": f.texto[:180],
+                "fuente": f.cita(),
+            }
+            for f in veredicto.fragmentos
+        ]
+
+    texto_agente = respuesta.texto
+    t2 = time.perf_counter()
+    audio_b64, _ = _sintetizar(texto_agente)
+    metrica.registrar_etapa("tts", (time.perf_counter() - t2) * 1000)
+
+    metrica.latencia_ms = (time.perf_counter() - inicio) * 1000
+    metrica.semaforo = respuesta.decision.semaforo.value
+    metrica.escalado = respuesta.escala
+    sesion.registro.persistir(metrica)
+
+    if respuesta.cierra:
+        sesion.finalizada = True
+
+    return JSONResponse(
+        {
+            **_estado_publico(sesion),
+            "texto_paciente": transcripcion.texto,
+            "texto_agente": texto_agente,
+            "audio_wav_base64": audio_b64,
+            "latencia_ms": round(metrica.latencia_ms, 1),
+            "escala": respuesta.escala,
+            "alarmas": respuesta.alarmas_detectadas,
+        }
+    )
+
+
+def _capa_de(motivo: str) -> str:
+    """Traduce el motivo del veredicto a la capa que lo produjo.
+
+    La compuerta tiene cuatro capas y la interfaz debe decir CUÁL bloqueó, no un
+    número contra un umbral: se midió que un umbral solo no separa las consultas
+    respondibles de las que el corpus no cubre.
+    """
+    if "personal médico" in motivo:
+        return "tema restringido"
+    if "fuera del alcance" in motivo:
+        return "procedimiento fuera del corpus"
+    if "sin documentación" in motivo:
+        return "filtro por procedimiento del paciente"
+    if "no trata el tema" in motivo:
+        return "verificación léxica"
+    if "similitud" in motivo:
+        return "umbral de similitud"
+    return "sustentado"
+
+
+@app.post("/api/llamada/{llamada_id}/colgar")
+async def colgar(llamada_id: str) -> JSONResponse:
+    """Cierra la llamada y devuelve el resumen estructurado."""
+    sesion = SERVICIOS.llamadas.get(llamada_id)
+    if sesion is None:
+        raise HTTPException(404, "llamada no encontrada")
+
+    await asyncio.get_running_loop().run_in_executor(
+        None, sesion.conversacion.esperar_extraccion
+    )
+    sesion.finalizada = True
+
+    estado = sesion.conversacion.estado
+    decision = evaluar(estado.cuadro)
+    return JSONResponse(
+        {
+            **_estado_publico(sesion),
+            "resumen": {
+                "escenario": estado.escenario,
+                "semaforo": decision.semaforo.value,
+                "motivos": decision.motivos,
+                "escalado": decision.escala,
+                "cuadro": {
+                    "dolor_nrs": estado.cuadro.dolor_nrs,
+                    "fiebre_c": estado.cuadro.fiebre_c,
+                    "herida": estado.cuadro.herida.value,
+                    "movilidad": estado.cuadro.movilidad.value,
+                    "sintomas_alarma": estado.cuadro.sintomas_alarma,
+                },
+                "sin_preguntar": estado.cuadro.campos_faltantes,
+                "citas": sesion.citas,
+            },
+        }
+    )
+
+
+# -- Conocimiento (G5) -----------------------------------------------------------
+
+
+@app.get("/api/documentos")
+async def listar_documentos() -> JSONResponse:
+    """Inventario del índice más lo que está procesándose en este momento."""
+    if SERVICIOS.indice is None:
+        raise HTTPException(503, "índice no disponible")
+
+    indexados = [
+        {
+            "doc_id": doc_id,
+            "nombre": datos["fuente"],
+            "escenario": datos["escenario"],
+            "fragmentos": datos["chunks"],
+            "estado": "indexado",
+            "nota": f"{datos['chunks']} fragmentos disponibles",
+        }
+        for doc_id, datos in SERVICIOS.indice.documentos().items()
+    ]
+    en_proceso = list(SERVICIOS.procesando.values())
+
+    return JSONResponse(
+        {
+            "documentos": en_proceso + sorted(indexados, key=lambda d: d["nombre"]),
+            "total_documentos": len(indexados) + len(en_proceso),
+            "total_fragmentos": SERVICIOS.indice.total_chunks(),
+            "en_proceso": len(en_proceso),
+            "motor": {
+                "base_vectorial": "ChromaDB",
+                "embeddings": MODELO_EMBEDDINGS,
+                "dimensiones": 384,
+                "fragmento_chars": 1200,
+            },
+        }
+    )
+
+
+@app.post("/api/documentos")
+async def subir_documento(archivo: UploadFile, escenario: str = ESCENARIO_DEMO):
+    """Sube un PDF, lo procesa y lo deja disponible. Es la mitad 'aprender' de G5."""
+    if SERVICIOS.indice is None:
+        raise HTTPException(503, "índice no disponible")
+    if not archivo.filename or not archivo.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "solo se aceptan archivos PDF")
+
+    destino = SUBIDAS / archivo.filename
+    destino.write_bytes(await archivo.read())
+
+    temporal = uuid.uuid4().hex[:8]
+    SERVICIOS.procesando[temporal] = {
+        "doc_id": temporal,
+        "nombre": archivo.filename,
+        "escenario": escenario,
+        "fragmentos": 0,
+        "estado": "extrayendo",
+        "nota": "extrayendo texto del PDF",
+    }
+
+    def procesar() -> dict:
+        documento = extraer_pdf(destino, escenario)
+        if documento.sin_capa_texto:
+            return {
+                "estado": "error",
+                "nota": "PDF sin capa de texto · requiere OCR",
+                "doc_id": documento.doc_id,
+                "fragmentos": 0,
+            }
+
+        trozos = fragmentar(documento)
+        SERVICIOS.procesando[temporal]["estado"] = "embeddings"
+        SERVICIOS.procesando[temporal]["nota"] = f"vectorizando {len(trozos)} fragmentos"
+
+        sospechoso = any(contiene_inyeccion(t.texto) for t in trozos)
+        SERVICIOS.indice.indexar(trozos)
+        return {
+            "estado": "indexado",
+            "nota": f"{len(trozos)} fragmentos disponibles",
+            "doc_id": documento.doc_id,
+            "fragmentos": len(trozos),
+            "sospechoso": sospechoso,
+        }
+
+    try:
+        resultado = await asyncio.get_running_loop().run_in_executor(None, procesar)
+    finally:
+        SERVICIOS.procesando.pop(temporal, None)
+
+    if resultado["estado"] == "error":
+        return JSONResponse(status_code=422, content=resultado)
+    return JSONResponse({**resultado, "nombre": archivo.filename})
+
+
+@app.delete("/api/documentos/{doc_id}")
+async def olvidar_documento(doc_id: str) -> JSONResponse:
+    """Elimina un documento del índice. Es la mitad 'olvidar' de G5.
+
+    Devuelve cuántos fragmentos se borraron: la consola muestra evidencia real de
+    la baja, no un mensaje optimista.
+    """
+    if SERVICIOS.indice is None:
+        raise HTTPException(503, "índice no disponible")
+
+    borrados = SERVICIOS.indice.olvidar(doc_id)
+    if borrados == 0:
+        raise HTTPException(404, "documento no encontrado en el índice")
+    return JSONResponse(
+        {
+            "doc_id": doc_id,
+            "fragmentos_eliminados": borrados,
+            "total_fragmentos": SERVICIOS.indice.total_chunks(),
+        }
+    )
+
+
+@app.get("/api/salud")
+async def salud() -> JSONResponse:
+    """Diagnóstico de arranque. Sirve al jurado para confirmar que todo está en pie."""
+    return JSONResponse(
+        {
+            "indice": SERVICIOS.indice is not None,
+            "fragmentos": SERVICIOS.indice.total_chunks() if SERVICIOS.indice else 0,
+            "sintetizador": SERVICIOS.sintetizador is not None,
+            "modelo": MODELO,
+            "modelo_disponible": SERVICIOS.cliente.disponible()
+            if SERVICIOS.cliente
+            else False,
+        }
+    )
+
+
+# -- Estáticos -------------------------------------------------------------------
+
+if WEB.exists():
+    app.mount("/static", StaticFiles(directory=str(WEB)), name="static")
+
+    @app.get("/")
+    async def raiz() -> FileResponse:
+        return FileResponse(str(WEB / "index.html"))

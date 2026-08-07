@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vela — Seguimiento posoperatorio</title>
+<style>
+:root{
+  --sans:'Avenir Next','Segoe UI',system-ui,-apple-system,sans-serif;
+  --mono:ui-monospace,'SF Mono','JetBrains Mono','Cascadia Mono',Menlo,Consolas,monospace;
+  --bg:#0a0c0f; --panel:#0f1216; --panel-2:#141920; --panel-3:#1a212a;
+  --line:#20262e; --line-2:#2c343e;
+  --text:#e7ebf0; --text-2:#98a2ae; --text-3:#69737f;
+  --accent:#4b8fd4; --accent-t:#8ab8e8; --accent-bg:rgba(75,143,212,.13);
+  --ok:#3f9b6d; --ok-t:#6cc396; --ok-bg:rgba(63,155,109,.13);
+  --warn:#b3872f; --warn-t:#dcb05a; --warn-bg:rgba(179,135,47,.13);
+  --crit:#c4544b; --crit-t:#f09187; --crit-bg:rgba(196,84,75,.13);
+  --r1:3px; --r2:5px; --r3:8px;
+}
+[data-theme="light"]{
+  --bg:#f4f6f8; --panel:#ffffff; --panel-2:#f0f2f5; --panel-3:#e7eaef;
+  --line:#e0e4e9; --line-2:#cbd2da;
+  --text:#0f151c; --text-2:#55606d; --text-3:#7b8692;
+  --accent:#1f66b5; --accent-t:#175093; --accent-bg:rgba(31,102,181,.09);
+  --ok:#1f7549; --ok-t:#18603a; --ok-bg:rgba(31,117,73,.10);
+  --warn:#7f5c12; --warn-t:#6b4d0d; --warn-bg:rgba(127,92,18,.11);
+  --crit:#a3332a; --crit-t:#8c2b23; --crit-bg:rgba(163,51,42,.10);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+::selection{background:rgba(75,143,212,.35)}
+:focus-visible{outline:2px solid var(--accent-t);outline-offset:2px;border-radius:2px}
+@keyframes dcIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.dcin{animation:dcIn 160ms cubic-bezier(.16,.84,.44,1) both}
+@media (prefers-reduced-motion:reduce){.dcin{animation:none}*{transition:none!important}}
+#app{height:100vh;min-height:720px;display:flex;flex-direction:column}
+header{height:46px;flex:none;display:flex;align-items:center;gap:20px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+.nav{display:flex;gap:2px;padding:2px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r2)}
+.nav button{padding:6px 16px;border:0;background:transparent;border-radius:var(--r1);font-size:13.5px;font-weight:600;color:var(--text-3)}
+.nav button.on{background:var(--accent);color:#fff;font-weight:700}
+.mono{font-family:var(--mono)}
+.lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3)}
+main.call{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 372px;grid-template-rows:minmax(0,1fr) auto}
+.hide{display:none!important}
+#tr{flex:1;min-height:0;overflow-y:auto;padding:14px 18px 18px;user-select:text}
+#docs .row{display:grid;grid-template-columns:minmax(0,1fr) 200px 96px 96px;gap:12px;align-items:center;padding:11px 15px;border-bottom:1px solid var(--line)}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:var(--r1);font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase}
+.metric{background:var(--panel);padding:10px 14px}
+.metric .v{margin-top:4px;font-family:var(--mono);font-size:19px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+</style>
+</head>
+<body>
+<div id="app" data-theme="dark">
+
+<header>
+  <div style="display:flex;align-items:center;gap:9px">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="14" height="14" rx="3" stroke="var(--accent)" stroke-width="1.4"/><path d="M3.5 8.4h2.2l1.1-2.9 1.6 5 1.1-2.1h2.9" stroke="var(--accent)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span style="font-size:16px;font-weight:800;letter-spacing:-.01em">Vela</span>
+    <span style="font-size:12.5px;color:var(--text-2);border-left:1px solid var(--line-2);padding-left:9px">Seguimiento posoperatorio</span>
+  </div>
+  <nav class="nav">
+    <button id="navCall" class="on">Llamada</button>
+    <button id="navKb">Conocimiento</button>
+  </nav>
+  <div style="flex:1"></div>
+  <div class="mono" style="display:flex;align-items:center;gap:7px;font-size:10.5px;color:var(--text-3);letter-spacing:.04em">
+    <span id="dotSalud" style="width:6px;height:6px;border-radius:50%;background:var(--text-3);display:inline-block"></span>
+    <span id="salud">verificando…</span>
+  </div>
+  <button id="tema" class="mono" style="padding:4px 9px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r1);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)">Oscuro</button>
+</header>
+
+<!-- ══════════ LLAMADA ══════════ -->
+<main class="call" id="vistaCall">
+  <section style="grid-column:1;grid-row:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--line)">
+
+    <div style="flex:none;padding:14px 18px 12px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;align-items:center;gap:18px">
+      <div style="min-width:0;flex:1">
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <span style="font-size:15px;font-weight:600;letter-spacing:-.01em">Paciente de demostración</span>
+          <span class="mono" style="font-size:10.5px;color:var(--text-3)" id="metaPaciente">datos sintéticos · colecistectomía</span>
+        </div>
+        <div style="margin-top:7px;display:flex;align-items:center;gap:10px">
+          <span style="display:inline-flex;align-items:center;gap:7px;padding:4px 10px 4px 8px;border:1px solid var(--line-2);background:var(--panel-2);border-radius:var(--r1);font-size:12.5px;font-weight:600">
+            <span id="dotEstado" style="width:7px;height:7px;border-radius:2px;background:var(--text-3);display:inline-block"></span>
+            <span id="estadoAgente">En espera</span>
+          </span>
+          <span class="mono" style="font-size:10.5px;color:var(--text-3)" id="notaEstado">Sin sesión de voz</span>
+        </div>
+      </div>
+      <div style="flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div id="barras" style="display:flex;align-items:center;gap:2px;height:34px;width:190px;justify-content:flex-end"></div>
+        <span class="lbl" id="notaAudio">Audio inactivo</span>
+      </div>
+    </div>
+
+    <div id="banEsc" class="hide dcin" style="flex:none;margin:14px 18px 0;border:1px solid var(--crit);border-left-width:3px;background:var(--crit-bg);border-radius:var(--r2);padding:13px 15px">
+      <div style="display:flex;align-items:center;gap:9px">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 1.6l6.2 11.2H1.8L8 1.6z" stroke="var(--crit-t)" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.1v3.1" stroke="var(--crit-t)" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.2" r=".85" fill="var(--crit-t)"/></svg>
+        <span style="font-size:13px;font-weight:700;color:var(--crit-t)">Escalación a personal médico</span>
+        <span class="mono" style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--crit-t);border:1px solid var(--crit);padding:2px 6px;border-radius:var(--r1)">Registrada</span>
+        <span style="flex:1"></span>
+        <span class="mono" style="font-size:10.5px;color:var(--text-2);font-variant-numeric:tabular-nums" id="escHora"></span>
+      </div>
+      <div style="margin-top:11px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r1);overflow:hidden">
+        <div style="background:var(--panel);padding:9px 11px"><div class="lbl">Disparador</div><div style="margin-top:4px;font-size:12px" id="escDisp">—</div></div>
+        <div style="background:var(--panel);padding:9px 11px"><div class="lbl">Regla cumplida</div><div class="mono" style="margin-top:4px;font-size:11.5px" id="escRegla">—</div></div>
+        <div style="background:var(--panel);padding:9px 11px"><div class="lbl">Acción tomada</div><div style="margin-top:4px;font-size:12px" id="escAcc">Registro clínico de escalación</div></div>
+      </div>
+    </div>
+
+    <div id="tr">
+      <div id="trVacio" style="height:100%;min-height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;border:1px dashed var(--line-2);border-radius:var(--r3);color:var(--text-3)">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 2.6a2.4 2.4 0 012.4 2.4v4.6a2.4 2.4 0 11-4.8 0V5A2.4 2.4 0 0110 2.6z" stroke="var(--text-3)" stroke-width="1.3"/><path d="M4.8 9.3a5.2 5.2 0 0010.4 0M10 14.6v2.8" stroke="var(--text-3)" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span style="font-size:12.5px">Sin llamada activa</span>
+        <span class="mono" style="font-size:10.5px">La transcripción aparece aquí en vivo</span>
+      </div>
+    </div>
+
+    <div style="flex:none;display:flex;align-items:center;gap:10px;padding:11px 18px;border-top:1px solid var(--line);background:var(--panel)">
+      <button id="btnIniciar" style="display:inline-flex;align-items:center;gap:8px;padding:8px 15px;background:var(--accent);border:1px solid var(--accent);border-radius:var(--r2);color:#fff;font-size:12.5px;font-weight:600">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 3.6c0-.7.6-1.3 1.3-1.3h1.5c.5 0 1 .4 1.1.9l.5 2c.1.4 0 .9-.4 1.1l-1 .7a9 9 0 003.9 4l.7-1c.3-.3.7-.5 1.1-.4l2 .5c.5.1.9.6.9 1.1v1.5c0 .7-.6 1.3-1.3 1.3A11.6 11.6 0 013 3.6z" fill="#fff"/></svg>
+        Iniciar llamada
+      </button>
+      <button id="btnHablar" class="hide" style="display:inline-flex;align-items:center;gap:8px;padding:8px 15px;background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r2);font-size:12.5px;font-weight:600">Mantener para hablar</button>
+      <button id="btnColgar" class="hide" style="display:inline-flex;align-items:center;gap:8px;padding:8px 15px;background:var(--crit-bg);border:1px solid var(--crit);border-radius:var(--r2);color:var(--crit-t);font-size:12.5px;font-weight:600">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>Colgar
+      </button>
+      <span class="mono" style="font-size:10.5px;color:var(--text-3);font-variant-numeric:tabular-nums" id="reloj">00:00</span>
+      <span style="flex:1"></span>
+      <span class="mono" style="font-size:10px;color:var(--text-3);letter-spacing:.05em">Transcripción seleccionable · es-CO</span>
+    </div>
+  </section>
+
+  <aside style="grid-column:2;grid-row:1;min-width:0;overflow-y:auto;background:var(--panel);display:flex;flex-direction:column">
+    <div style="padding:13px 15px;border-bottom:1px solid var(--line)">
+      <div style="margin-bottom:9px">
+        <div style="font-size:13.5px;font-weight:700">¿Cómo está el paciente?</div>
+        <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Nivel de riesgo, decidido en código y actualizado con cada turno</div>
+      </div>
+      <div id="riesgo" style="border:2px solid var(--ok);border-radius:var(--r2);background:var(--ok-bg);padding:13px 14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span id="riesgoIcono"></span>
+          <span id="riesgoTitulo" style="font-size:16.5px;font-weight:800;color:var(--ok-t)">Verde · Estable</span>
+        </div>
+        <p id="riesgoMotivo" style="margin:9px 0 0;font-size:13px;color:var(--text-2);line-height:1.45">Sin hallazgos de alarma.</p>
+        <p id="riesgoIndagar" class="hide mono" style="margin:8px 0 0;font-size:10.5px;color:var(--warn-t)"></p>
+      </div>
+    </div>
+
+    <div style="padding:13px 15px;border-bottom:1px solid var(--line)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px">
+        <span style="font-size:13.5px;font-weight:700">Lo que detectó el agente</span>
+        <span style="font-size:11px;color:var(--text-3)" id="nHallazgos">0</span>
+      </div>
+      <div id="hallazgos" style="display:flex;flex-direction:column;gap:5px">
+        <div style="border:1px dashed var(--line-2);border-radius:var(--r2);padding:14px;text-align:center" class="mono lbl">Sin extracciones aún</div>
+      </div>
+    </div>
+
+    <div style="padding:13px 15px;border-bottom:1px solid var(--line)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px">
+        <span style="font-size:13.5px;font-weight:700">De dónde saca la respuesta</span>
+        <span style="font-size:11px;color:var(--text-3)">compuerta en 4 capas</span>
+      </div>
+      <div id="gate"></div>
+      <div id="citas" style="display:flex;flex-direction:column;gap:6px">
+        <div style="border:1px dashed var(--line-2);border-radius:var(--r2);padding:14px;text-align:center" class="mono lbl">Sin citas en el turno actual</div>
+      </div>
+    </div>
+  </aside>
+
+  <footer style="grid-column:1 / -1;grid-row:2;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background-color:var(--line)">
+    <div class="metric"><div style="font-size:11px;color:var(--text-3)">Tiempo de respuesta</div><div class="v" id="mUlt">—</div></div>
+    <div class="metric"><div style="font-size:11px;color:var(--text-3)">Típico (p50)</div><div class="v" style="color:var(--text-2)" id="mP50">—</div></div>
+    <div class="metric"><div style="font-size:11px;color:var(--text-3)">Peor caso (p95)</div><div class="v" style="color:var(--text-2)" id="mP95">—</div></div>
+    <div class="metric"><div style="font-size:11px;color:var(--text-3)">Tokens</div><div class="v" style="color:var(--text-2)" id="mTok">—</div></div>
+    <div class="metric"><div style="font-size:11px;color:var(--text-3)">Consultas al modelo</div><div class="v" style="color:var(--text-2)" id="mCalls">0</div></div>
+    <div class="metric"><div style="font-size:11px;color:var(--text-3)">Búsquedas RAG</div><div class="v" style="color:var(--text-2)" id="mRag">0</div></div>
+    <div class="metric" style="display:flex;flex-direction:column;justify-content:center">
+      <div style="font-size:11px;color:var(--text-3)">Motor de razonamiento</div>
+      <div style="margin-top:5px;display:flex;align-items:center;gap:7px">
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none"></span>
+        <span class="mono" style="font-size:11.5px" id="mModelo">llama3.2:3b · local</span>
+      </div>
+    </div>
+  </footer>
+</main>
+
+<!-- ══════════ CONOCIMIENTO ══════════ -->
+<main id="vistaKb" class="hide" style="flex:1;min-height:0;overflow-y:auto">
+  <div style="max-width:1080px;margin:0 auto;padding:24px 24px 48px">
+    <div style="display:flex;align-items:flex-end;gap:24px;margin-bottom:18px">
+      <div style="flex:1;min-width:0">
+        <h1 style="margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em">Conocimiento del agente</h1>
+        <p style="margin:5px 0 0;font-size:13px;color:var(--text-2)">Los documentos clínicos que respaldan cada respuesta. Subí uno, mirá cómo se procesa, y borralo cuando ya no aplique.</p>
+      </div>
+      <div style="display:flex;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;flex:none">
+        <div style="background:var(--panel);padding:9px 16px;min-width:104px"><div style="font-size:11px;color:var(--text-3)">Documentos</div><div class="v mono" style="margin-top:3px;font-size:20px;font-weight:600;font-variant-numeric:tabular-nums" id="kbDocs">—</div></div>
+        <div style="background:var(--panel);padding:9px 16px;min-width:104px"><div style="font-size:11px;color:var(--text-3)">Fragmentos</div><div class="v mono" style="margin-top:3px;font-size:20px;font-weight:600;font-variant-numeric:tabular-nums" id="kbChunks">—</div></div>
+        <div style="background:var(--panel);padding:9px 16px;min-width:104px"><div style="font-size:11px;color:var(--text-3)">En proceso</div><div class="v mono" style="margin-top:3px;font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-2)" id="kbPend">0</div></div>
+      </div>
+    </div>
+
+    <label id="drop" style="display:flex;align-items:center;gap:14px;padding:18px 20px;border:1px dashed var(--line-2);border-radius:var(--r3);background:var(--panel);cursor:pointer;margin-bottom:20px">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style="flex:none"><path d="M10 13.4V3.8m0 0L6.6 7.2M10 3.8l3.4 3.4" stroke="var(--accent)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.2 12.6v2.4a1.6 1.6 0 001.6 1.6h10.4a1.6 1.6 0 001.6-1.6v-2.4" stroke="var(--accent)" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:700">Subir documentación clínica</div>
+        <div style="margin-top:3px;font-size:12px;color:var(--text-3)">Archivos PDF — arrastrá aquí o hacé clic para elegir</div>
+      </div>
+      <span style="flex:none;padding:6px 13px;border:1px solid var(--line-2);border-radius:var(--r1);font-size:12px;background:var(--panel-2)">Elegir archivo</span>
+      <input id="file" type="file" accept="application/pdf" multiple style="display:none">
+    </label>
+
+    <div id="toast" class="hide dcin" style="display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:var(--r2);margin-bottom:14px"></div>
+
+    <div style="border:1px solid var(--line);border-radius:var(--r3);background:var(--panel);overflow:hidden">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 200px 96px 96px;gap:12px;padding:10px 15px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12.5px;font-weight:600;color:var(--text-2)">
+        <span>Documento</span><span>Estado del procesamiento</span><span style="text-align:right">Fragmentos</span><span style="text-align:right">Acción</span>
+      </div>
+      <div id="docs"></div>
+    </div>
+
+    <div style="margin-top:10px;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-3)">
+      <span id="motor">Detalle técnico: —</span>
+      <span style="flex:1"></span>
+      <span>El índice se distribuye pre-construido para levantar en menos de 15 minutos</span>
+    </div>
+  </div>
+</main>
+</div>
+
+<script src="/static/consola.js"></script>
+</body>
+</html>
