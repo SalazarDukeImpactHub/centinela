@@ -64,6 +64,12 @@ class CuadroClinico:
     herida: Herida = Herida.DESCONOCIDO
     movilidad: Movilidad = Movilidad.DESCONOCIDO
     sintomas_alarma: list[str] = field(default_factory=list)
+    # El paciente dijo tener fiebre o escalofríos pero no dio un número.
+    # NO es lo mismo que no tener fiebre ni que tenerla alta: "me sentí
+    # afiebrado" puede ser 37.2 (verde) o 39 (rojo). Asumir cualquiera de las dos
+    # es un error clínico, así que se registra el dato como lo que es —una
+    # sospecha sin medir— y se pide el número.
+    fiebre_referida_sin_medir: bool = False
 
     @property
     def campos_faltantes(self) -> list[str]:
@@ -76,6 +82,11 @@ class CuadroClinico:
         if self.herida is Herida.DESCONOCIDO:
             faltan.append("herida")
         return faltan
+
+    @property
+    def falta_el_numero_de_fiebre(self) -> bool:
+        """Refirió fiebre pero no la midió: hay que pedir la cifra."""
+        return self.fiebre_referida_sin_medir and self.fiebre_c is None
 
     @property
     def completo(self) -> bool:
@@ -129,6 +140,12 @@ def evaluar(cuadro: CuadroClinico) -> Decision:
             motivos_rojo.append(f"fiebre {cuadro.fiebre_c} °C ≥ {FIEBRE_ROJO}")
         elif cuadro.fiebre_c >= FIEBRE_AMARILLO:
             motivos_amarillo.append(f"febrícula {cuadro.fiebre_c} °C")
+    elif cuadro.fiebre_referida_sin_medir:
+        # Fiebre referida sin termómetro. No se asume alta —sería alarmismo— ni
+        # se descarta —sería el falso negativo que la rúbrica castiga—. Queda en
+        # amarillo hasta obtener la cifra: amarillo cuesta una llamada de
+        # verificación, y eso es exactamente lo que hace falta acá.
+        motivos_amarillo.append("fiebre referida sin medir")
 
     if cuadro.herida is Herida.SECRECION_PURULENTA:
         motivos_rojo.append("secreción purulenta en la herida")

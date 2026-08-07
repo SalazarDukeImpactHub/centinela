@@ -148,12 +148,18 @@ def _fusionar(previo: CuadroClinico, nuevo: dict) -> CuadroClinico:
 
     alarmas = list(dict.fromkeys(previo.sintomas_alarma + nuevo.get("sintomas_alarma", [])))
 
+    # La sospecha de fiebre sin medir se conserva hasta que llegue una cifra:
+    # es lo que hace que el agente pida el número en vez de seguir de largo.
+    fiebre_final = fiebre if fiebre is not None else previo.fiebre_c
+    sin_medir = bool(nuevo.get("menciona_fiebre_sin_medir")) or previo.fiebre_referida_sin_medir
+
     return CuadroClinico(
         dolor_nrs=dolor if dolor is not None else previo.dolor_nrs,
-        fiebre_c=fiebre if fiebre is not None else previo.fiebre_c,
+        fiebre_c=fiebre_final,
         herida=herida,
         movilidad=movilidad,
         sintomas_alarma=alarmas,
+        fiebre_referida_sin_medir=sin_medir and fiebre_final is None,
     )
 
 

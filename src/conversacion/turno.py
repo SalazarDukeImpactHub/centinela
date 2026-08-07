@@ -38,7 +38,7 @@ import threading
 from dataclasses import dataclass, field
 from enum import Enum
 
-from src.clinico import alarmas
+from src.clinico import alarmas, fiebre
 from src.clinico.escalamiento import CuadroClinico, Decision, Semaforo, evaluar
 from src.clinico.extraccion import extraer
 from src.modelo.cliente import ClienteLocal
@@ -58,20 +58,40 @@ class Foco(str, Enum):
 # preguntan temprano. Si la llamada se corta, lo crítico ya está preguntado.
 ORDEN_FOCOS = [Foco.FIEBRE, Foco.HERIDA, Foco.DOLOR, Foco.MOVILIDAD]
 
+# Las preguntas van en lenguaje de paciente, no de historia clínica. Se evita
+# "¿ha presentado?" y "refiera usted": nadie habla así por teléfono.
 PREGUNTAS: dict[Foco, str] = {
-    Foco.FIEBRE: "¿Ha tenido fiebre o escalofríos desde la cirugía?",
-    Foco.HERIDA: "¿Cómo ve la herida? ¿Está roja, hinchada, o le sale algún líquido?",
-    Foco.DOLOR: "En una escala del cero al diez, ¿qué tanto le duele en este momento?",
-    Foco.MOVILIDAD: "¿Puede moverse y caminar como esperaba después de la operación?",
+    Foco.FIEBRE: "Cuénteme, ¿ha tenido fiebre o escalofríos estos días?",
+    Foco.HERIDA: "¿Y cómo ve la herida? Me interesa si está roja, hinchada o si le sale algún líquido.",
+    Foco.DOLOR: "Hablemos del dolor. Si cero es nada y diez es lo más fuerte que ha sentido, ¿en cuánto lo pondría ahora?",
+    Foco.MOVILIDAD: "¿Se ha podido mover y caminar como esperaba?",
 }
 
 # Repregunta cuando el paciente esquiva. No repite la misma frase: insistir con las
 # mismas palabras a alguien que ya minimizó no funciona.
 REPREGUNTAS: dict[Foco, str] = {
-    Foco.FIEBRE: "Le pregunto de otra manera: ¿se ha sentido caliente o destemplado?",
-    Foco.HERIDA: "¿La ha podido mirar hoy? Me sirve saber de qué color está.",
-    Foco.DOLOR: "Aunque sea aproximado: ¿el dolor le deja dormir y moverse?",
-    Foco.MOVILIDAD: "¿Se levanta de la cama sin ayuda?",
+    Foco.FIEBRE: "Se lo pregunto de otra manera: ¿en algún momento se sintió caliente o destemplado?",
+    Foco.HERIDA: "¿La ha alcanzado a mirar hoy? Con saber de qué color está me ayuda bastante.",
+    Foco.DOLOR: "Aunque sea por encimita: ¿el dolor lo deja dormir y moverse tranquilo?",
+    Foco.MOVILIDAD: "¿Se levanta de la cama sin que nadie lo ayude?",
+}
+
+# Repregunta por DATO FALTANTE: el paciente respondió, pero sin la cifra que la
+# decisión necesita. Es distinto de la evasión — acá sí quiere colaborar.
+#
+# El caso de la fiebre es el que más pesa: "tuve fiebre" puede ser 37.2 (verde) o
+# 39 (rojo), y el umbral de escalamiento está justo en 38. Seguir de largo sin el
+# número obliga a asumir, y asumir en cualquiera de las dos direcciones es un
+# error clínico.
+PEDIDOS_DE_DATO: dict[Foco, str] = {
+    Foco.FIEBRE: (
+        "¿Se alcanzó a tomar la temperatura? Si tiene el número me sirve mucho, "
+        "porque no es lo mismo treinta y siete que treinta y nueve."
+    ),
+    Foco.DOLOR: (
+        "¿Y si tuviera que ponerle un número del cero al diez, cuál sería? "
+        "Aunque sea aproximado."
+    ),
 }
 
 # Apertura: se presenta con nombre y rol, dice qué va a hacer y ofrece ayuda.
@@ -84,28 +104,42 @@ APERTURA = (
     "puedo ayudarle en algo."
 )
 
+# Escalamiento: se nombra lo que pasa sin dramatizarlo, y sobre todo se dice qué
+# va a ocurrir después. Un paciente al que le anuncian que algo anda mal y no le
+# explican el siguiente paso se queda solo con el susto.
 ESCALAMIENTO = (
-    "Por lo que me cuenta, esto necesita que lo revise el equipo médico. "
-    "Voy a reportarlo ahora mismo y alguien se va a comunicar con usted."
+    "Le agradezco que me lo cuente, porque eso sí hay que mirarlo hoy mismo. Lo "
+    "estoy reportando al equipo de salud en este momento, y se van a comunicar "
+    "con usted en breve. Mientras tanto no se aplique nada en la herida, y si se "
+    "siente peor no espere la llamada: consulte de una vez."
 )
 
 CIERRE_VERDE = (
-    "Su recuperación va como esperamos. Si aparece fiebre, si la herida cambia "
-    "de aspecto o si el dolor aumenta, llame de inmediato. Que se mejore."
+    "Me deja tranquilo, su recuperación va bien encaminada. Le pido una cosa: si "
+    "le llega a dar fiebre, si la herida le cambia de aspecto o si el dolor "
+    "aumenta, no espere a la próxima llamada y avise de una vez. "
+    "Que siga mejorando, y gracias por su tiempo."
 )
 
 CIERRE_AMARILLO = (
-    "Voy a dejar registrado lo que me contó para que el equipo lo revise. "
-    "Si algo empeora antes de que la contacten, llame de inmediato."
+    "Voy a dejar anotado todo lo que me contó para que el equipo lo revise con "
+    "calma. Es probable que lo llamen para verificar un par de cosas. "
+    "Si algo se pone peor antes de eso, avise de una vez. Que se mejore."
 )
 
-# Reconocimiento breve antes de la siguiente pregunta. Evita que el paciente
-# sienta que habló al vacío mientras la extracción corre por detrás.
+# Reconocimiento breve antes de la siguiente pregunta. Cumple dos funciones: que
+# el paciente sepa que se le escuchó, y llenar el silencio mientras la extracción
+# corre por detrás. La rúbrica pregunta explícitamente qué hace la solución
+# durante los silencios.
 ACUSES = {
-    Semaforo.VERDE: "Entiendo.",
-    Semaforo.AMARILLO: "Gracias por contarme, lo anoto.",
-    Semaforo.ROJO: "Entiendo, eso es importante.",
+    Semaforo.VERDE: "Listo, gracias.",
+    Semaforo.AMARILLO: "Bueno, eso me sirve saberlo.",
+    Semaforo.ROJO: "Entiendo, eso sí es importante.",
 }
+
+# Acuse cuando el paciente cuenta algo que preocupa. Reconoce lo que dijo antes
+# de seguir preguntando: pasar de largo suena a formulario.
+ACUSE_PREOCUPACION = "Entiendo su preocupación, y hace bien en contármelo."
 
 
 @dataclass
@@ -116,6 +150,9 @@ class EstadoLlamada:
     cuadro: CuadroClinico = field(default_factory=CuadroClinico)
     preguntados: set[Foco] = field(default_factory=set)
     repreguntados: set[Foco] = field(default_factory=set)
+    # Focos donde ya se pidió la cifra concreta. Se pide UNA vez: insistir dos
+    # veces por un número que el paciente no tiene es hostigarlo.
+    datos_pedidos: set[Foco] = field(default_factory=set)
     foco_actual: Foco | None = None
     cerrada: bool = False
     transcripcion: list[tuple[str, str]] = field(default_factory=list)
@@ -124,6 +161,16 @@ class EstadoLlamada:
         for foco in ORDEN_FOCOS:
             if foco not in self.preguntados:
                 return foco
+        return None
+
+    def dato_pendiente(self) -> Foco | None:
+        """Foco donde el paciente respondió pero falta la cifra que decide.
+
+        Tiene prioridad sobre avanzar al siguiente tema: sin el número de la
+        fiebre no se puede distinguir un 37.2 de un 39, y el umbral está en 38.
+        """
+        if self.cuadro.falta_el_numero_de_fiebre and Foco.FIEBRE not in self.datos_pedidos:
+            return Foco.FIEBRE
         return None
 
 
@@ -212,6 +259,14 @@ class Conversacion:
                 ]
                 self.estado.cuadro.sintomas_alarma.extend(nuevas)
 
+        # 1b. Fiebre referida sin cifra, también en código y en este mismo turno.
+        #     Por la vía de la extracción llegaría un turno tarde, y preguntar
+        #     "¿de cuánto?" después de haber cambiado de tema suena a no haber
+        #     escuchado.
+        if fiebre.refiere_fiebre_sin_cifra(texto_paciente):
+            with self._lock:
+                self.estado.cuadro.fiebre_referida_sin_medir = True
+
         # 2. La extracción arranca en segundo plano y no bloquea nada.
         self._extraer_en_segundo_plano(texto_paciente, foco_previo)
 
@@ -231,7 +286,24 @@ class Conversacion:
             )
 
         # 4. Siguiente pregunta desde plantilla: cero costo de modelo.
+        #    Antes de avanzar de tema, se pide la cifra que quedó pendiente. Sin
+        #    el número de la fiebre no se puede decidir, y asumirlo es un error
+        #    clínico en las dos direcciones.
         with self._lock:
+            pendiente = self.estado.dato_pendiente()
+            if pendiente is not None:
+                self.estado.datos_pedidos.add(pendiente)
+                self.estado.foco_actual = pendiente
+                texto = f"{ACUSE_PREOCUPACION} {PEDIDOS_DE_DATO[pendiente]}"
+                self.estado.transcripcion.append(("agente", texto))
+                return RespuestaTurno(
+                    texto=texto,
+                    decision=decision,
+                    escala=False,
+                    cierra=False,
+                    foco=pendiente,
+                    alarmas_detectadas=detectadas,
+                )
             foco = self.estado.siguiente_foco()
 
         if foco is None:

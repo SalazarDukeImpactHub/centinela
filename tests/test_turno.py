@@ -98,9 +98,15 @@ class TestAlarmasInmediatas:
         conv.abrir()
         r = conv.responder("Anoche me desmayé en el baño")
         assert r.escala
-        assert "equipo médico" in r.texto
-        assert "tranquil" not in r.texto.lower()
-        assert "bien" not in r.texto.lower()
+        bajo = r.texto.lower()
+        # Invariantes del mensaje de escalación: nombra al equipo de salud, dice
+        # qué va a pasar después, y NO tranquiliza — la rúbrica penaliza por
+        # nombre la falsa tranquilidad ante un síntoma de alarma.
+        assert "equipo" in bajo
+        assert "comunicar" in bajo or "llamar" in bajo
+        assert "tranquil" not in bajo
+        assert "no se preocupe" not in bajo
+        assert "todo está bien" not in bajo
 
 
 class TestCaminoCritico:
