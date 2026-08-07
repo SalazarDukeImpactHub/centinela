@@ -141,11 +141,21 @@ class IndiceClinico:
         """Inventario por documento para la consola de administración."""
         todos = self.coleccion.get(include=["metadatas"])
         inventario: dict[str, dict[str, object]] = {}
-        for meta in todos.get("metadatas", []):
+        for meta in todos.get("metadatas") or []:
+            # Acceso defensivo: la consola de administración no puede caerse por un
+            # chunk con metadatos incompletos. Un índice escrito por otra versión
+            # del código, o restaurado a medias, dejaría a la operación sin forma
+            # de listar ni de borrar documentos — y G5 se verifica desde ahí.
+            if not meta or not meta.get("doc_id"):
+                continue
             doc_id = str(meta["doc_id"])
             entrada = inventario.setdefault(
                 doc_id,
-                {"fuente": meta["fuente"], "escenario": meta["escenario"], "chunks": 0},
+                {
+                    "fuente": str(meta.get("fuente", "(desconocido)")),
+                    "escenario": str(meta.get("escenario", "(sin escenario)")),
+                    "chunks": 0,
+                },
             )
             entrada["chunks"] = int(entrada["chunks"]) + 1
         return inventario

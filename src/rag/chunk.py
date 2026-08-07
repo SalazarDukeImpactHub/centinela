@@ -49,8 +49,16 @@ class Chunk:
 
 
 def _normalizar(texto: str) -> str:
-    """Colapsa espacios y quita guiones de corte de línea de los PDF."""
+    """Colapsa espacios, une palabras cortadas y elimina artefactos de glifo.
+
+    Los PDF con fuentes de codificación propia producen caracteres de control al
+    extraerse: viñetas y separadores que PyMuPDF mapea a \\x01, \\x08 y similares.
+    Se midió sobre el corpus: 91 de 6.512 chunks los contienen, incluidos 77 bytes
+    nulos. Un byte nulo rompe SQLite, la serialización JSON y cualquier biblioteca
+    escrita en C — es decir, la mitad del pipeline.
+    """
     texto = re.sub(r"-\n(\w)", r"\1", texto)  # palabra cortada al final de renglón
+    texto = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", texto)
     texto = re.sub(r"\s+", " ", texto)
     return texto.strip()
 

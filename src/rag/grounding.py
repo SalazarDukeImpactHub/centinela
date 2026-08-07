@@ -37,6 +37,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
+from src.rag import saneamiento
 from src.rag.index import IndiceClinico, Recuperado
 
 # Piso de similitud. Bajo a propósito: acá solo descarta lo abiertamente ajeno.
@@ -145,10 +146,18 @@ class Veredicto:
 
     @property
     def contexto(self) -> str:
-        """Texto que se inyecta al modelo, ya numerado para poder citarlo."""
-        return "\n\n".join(
-            f"[{i}] ({f.cita()}) {f.texto}" for i, f in enumerate(self.fragmentos, 1)
+        """Texto que se inyecta al modelo: saneado, numerado y delimitado.
+
+        El saneamiento no es opcional. La compuerta G5 obliga a exponer una consola
+        de carga de documentos, y ese canal termina en el prompt del modelo: un PDF
+        preparado puede intentar darle instrucciones. La rúbrica penaliza por nombre
+        que el agente obedezca instrucciones contrarias a su misión.
+        """
+        cuerpo = "\n\n".join(
+            f"[{i}] ({f.cita()}) {saneamiento.sanear(f.texto)}"
+            for i, f in enumerate(self.fragmentos, 1)
         )
+        return saneamiento.envolver(cuerpo)
 
 
 def _normalizar(texto: str) -> str:

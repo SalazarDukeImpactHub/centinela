@@ -128,10 +128,19 @@ class TestCompuertaCompleta:
             assert f.fuente and f.pagina >= 1
             assert "(p." in f.cita()
 
-    def test_el_contexto_va_numerado_para_citar(self, indice):
+    def test_el_contexto_va_numerado_y_delimitado(self, indice):
+        """El contexto se numera para poder citarlo y se envuelve como datos.
+
+        La envoltura existe porque la consola de G5 permite subir documentos y su
+        texto termina en el prompt del modelo. Ver src/rag/saneamiento.py.
+        """
+        from src.rag.saneamiento import APERTURA, CIERRE
+
         v = verificar(indice, "signos de infección en la herida", escenario=RODILLA)
         assert v.permitido
-        assert v.contexto.startswith("[1] (")
+        assert v.contexto.startswith(APERTURA)
+        assert v.contexto.rstrip().endswith(CIERRE)
+        assert "[1] (" in v.contexto
 
     def test_mastectomia_no_tiene_sustento_en_el_corpus(self, indice):
         """La carpeta `breast_cancer` del kit contiene literatura de cáncer de
