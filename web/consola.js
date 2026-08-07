@@ -8,7 +8,9 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const app = $('app');
+// El tema vive en <html>: <body> es ancestro del contenedor y no heredaría las
+// variables si el atributo estuviera más abajo.
+const raiz = document.documentElement;
 
 let llamadaId = null;
 let grabadora = null;
@@ -21,10 +23,11 @@ let segundos = 0;
 let rafBarras = null;
 
 /* ── Tema ─────────────────────────────────────────────────────────────────── */
+/* Claro por defecto: la consola se usa en salas iluminadas y se proyecta. */
 $('tema').onclick = () => {
-  const oscuro = app.dataset.theme === 'dark';
-  app.dataset.theme = oscuro ? 'light' : 'dark';
-  $('tema').textContent = oscuro ? 'Claro' : 'Oscuro';
+  const claro = raiz.dataset.theme !== 'dark';
+  raiz.dataset.theme = claro ? 'dark' : 'light';
+  $('tema').textContent = claro ? 'Modo claro' : 'Modo oscuro';
 };
 
 /* ── Navegación ───────────────────────────────────────────────────────────── */
@@ -143,8 +146,7 @@ const iniciarGrabacion = () => {
   grabadora.ondataavailable = (e) => e.data.size && trozos.push(e.data);
   grabadora.onstop = enviarTurno;
   grabadora.start();
-  $('btnHablar').style.background = 'var(--accent)';
-  $('btnHablar').style.color = '#fff';
+  $('btnHablar').classList.add('rec');
   $('btnHablar').textContent = 'Grabando… soltá para enviar';
 };
 
@@ -152,9 +154,8 @@ const detenerGrabacion = () => {
   if (!grabadora) return;
   grabadora.stop();
   grabadora = null;
-  $('btnHablar').style.background = 'var(--panel-2)';
-  $('btnHablar').style.color = '';
-  $('btnHablar').textContent = 'Mantener para hablar';
+  $('btnHablar').classList.remove('rec');
+  $('btnHablar').textContent = 'Mantené presionado para hablar';
 };
 
 $('btnHablar').addEventListener('mousedown', iniciarGrabacion);
@@ -239,7 +240,8 @@ function pintar(d) {
   const caja = $('riesgo');
   caja.style.borderColor = c.b;
   caja.style.background = c.f;
-  caja.style.borderLeftWidth = d.semaforo === 'rojo' ? '4px' : '2px';
+  $('riesgoPunto').style.background = c.b;
+  $('riesgoPunto').style.boxShadow = '0 0 0 4px ' + c.f;
   $('riesgoTitulo').textContent = c.n;
   $('riesgoTitulo').style.color = c.t;
   $('riesgoMotivo').textContent = d.motivos.join(' · ');

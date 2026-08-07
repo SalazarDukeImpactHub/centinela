@@ -74,9 +74,14 @@ REPREGUNTAS: dict[Foco, str] = {
     Foco.MOVILIDAD: "¿Se levanta de la cama sin ayuda?",
 }
 
+# Apertura: se presenta con nombre y rol, dice qué va a hacer y ofrece ayuda.
+# Todo en USTED. El registro no se mezcla: los pacientes del dataset son adultos
+# colombianos, muchos mayores, y alternar usted y tú en la misma frase suena
+# descuidado justo en el momento en que el agente se está ganando la confianza.
 APERTURA = (
-    "Buenos días, le habla el sistema de seguimiento de su cirugía. "
-    "Voy a hacerle unas preguntas para ver cómo va su recuperación."
+    "Buenos días, le habla Centinela, su agente encargado del seguimiento de su "
+    "cirugía. Voy a hacerle unas preguntas para ver cómo va su recuperación y si "
+    "puedo ayudarle en algo."
 )
 
 ESCALAMIENTO = (

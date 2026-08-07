@@ -50,7 +50,7 @@ WEB = RAIZ / "web"
 # Escenario por defecto de la demo. En producción vendría del perfil del paciente.
 ESCENARIO_DEMO = "cholecystitis"
 
-app = FastAPI(title="Vela — seguimiento posoperatorio", version="0.1")
+app = FastAPI(title="Centinela — seguimiento posoperatorio", version="0.1")
 
 
 # -- Estado del proceso ----------------------------------------------------------
