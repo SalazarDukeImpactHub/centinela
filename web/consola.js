@@ -150,10 +150,20 @@ async function abrirMicrofono() {
 }
 
 /* Pulsar para hablar: evita cortar al paciente a mitad de frase, que es el
- * problema clásico de la detección automática de fin de turno. */
+ * problema clásico de la detección automática de fin de turno.
+ *
+ * `procesando` serializa los turnos del lado del navegador: mientras el anterior
+ * viaja, el botón queda deshabilitado. Sin esto, dos grabaciones seguidas se
+ * procesaban en paralelo y las respuestas volvían encimadas — la conversación
+ * "se pegaba" y después hablaba varias veces. El servidor además rechaza el
+ * turno concurrente con 429, por si algún cliente no respeta la señal. */
+let procesando = false;
+let inicioGrabacion = 0;
+
 const iniciarGrabacion = () => {
-  if (!stream || grabadora) return;
+  if (!stream || grabadora || procesando) return;
   trozos = [];
+  inicioGrabacion = Date.now();
   grabadora = new MediaRecorder(stream);
   grabadora.ondataavailable = (e) => e.data.size && trozos.push(e.data);
   grabadora.onstop = enviarTurno;
@@ -177,7 +187,17 @@ $('btnHablar').addEventListener('touchstart', (e) => { e.preventDefault(); inici
 $('btnHablar').addEventListener('touchend', (e) => { e.preventDefault(); detenerGrabacion(); });
 
 async function enviarTurno() {
-  if (!trozos.length || !llamadaId) return;
+  if (!trozos.length || !llamadaId || procesando) return;
+
+  // Un toque accidental del botón produce una grabación de milisegundos que
+  // Whisper transcribe como ruido. Se descarta acá, sin viajar al servidor.
+  if (Date.now() - inicioGrabacion < 400) {
+    estado('Escuchando', 'Grabación muy corta, mantené presionado mientras habla', 'var(--accent)');
+    return;
+  }
+
+  procesando = true;
+  bloquearHablar(true);
   estado('Procesando', 'Transcribiendo y decidiendo', 'var(--warn)');
 
   const forma = new FormData();
@@ -187,10 +207,11 @@ async function enviarTurno() {
     if (!r.ok) {
       const detalle = await r.json().catch(() => ({ detail: r.statusText }));
       const mensaje = detalle.detail || `error ${r.status}`;
-      // 422 es del audio y se reintenta hablando de nuevo. Cualquier otro código
-      // es del servicio: se muestra en rojo y en la transcripción, porque un
-      // fallo silencioso hace creer que la conversación simplemente no avanza.
-      if (r.status === 422) {
+      // 422 es del audio y 429 es un turno todavía en curso: ambos se resuelven
+      // hablando de nuevo, sin alarma. Cualquier otro código es del servicio:
+      // se muestra en rojo y en la transcripción, porque un fallo silencioso
+      // hace creer que la conversación simplemente no avanza.
+      if (r.status === 422 || r.status === 429) {
         estado('Escuchando', mensaje, 'var(--accent)');
       } else {
         estado('Error del servicio', mensaje, 'var(--crit)');
@@ -205,7 +226,20 @@ async function enviarTurno() {
   } catch (e) {
     estado('Error del servicio', e.message, 'var(--crit)');
     avisoEnLlamada(e.message);
+  } finally {
+    procesando = false;
+    bloquearHablar(false);
   }
+}
+
+/* El botón de hablar refleja si se puede hablar. Deshabilitarlo mientras el
+ * turno viaja es lo que evita el doble envío desde la raíz. */
+function bloquearHablar(bloqueado) {
+  const b = $('btnHablar');
+  b.disabled = bloqueado;
+  b.style.opacity = bloqueado ? '.55' : '';
+  if (bloqueado) b.textContent = 'Procesando su respuesta…';
+  else if (llamadaId) b.textContent = 'Mantené presionado para hablar';
 }
 
 /* Un fallo del servicio se escribe en la transcripción, donde el operador está
@@ -236,6 +270,8 @@ $('btnColgar').onclick = async () => {
 
 function finalizar() {
   clearInterval(relojT);
+  if (audioActual) { audioActual.pause(); audioActual = null; }
+  procesando = false;
   if (stream) stream.getTracks().forEach((t) => t.stop());
   if (ctxAudio) ctxAudio.close();
   stream = null; ctxAudio = null; analizador = null;
@@ -255,14 +291,23 @@ function estado(texto, nota, color) {
   $('dotEstado').style.background = color;
 }
 
+let audioActual = null;
+
 function reproducir(b64) {
   if (!b64) return;
+  // Nunca dos voces encimadas: el audio anterior se corta antes de reproducir
+  // el nuevo. Con turnos concurrentes, esto era el "responde varias veces".
+  if (audioActual) {
+    audioActual.onended = null;
+    audioActual.pause();
+  }
   estado('Hablando', 'Reproduciendo respuesta', 'var(--ok)');
-  const audio = new Audio('data:audio/wav;base64,' + b64);
-  audio.onended = () => {
+  audioActual = new Audio('data:audio/wav;base64,' + b64);
+  audioActual.onended = () => {
+    audioActual = null;
     if (llamadaId) estado('Escuchando', 'Turno del paciente', 'var(--accent)');
   };
-  audio.play().catch(() => {});
+  audioActual.play().catch(() => {});
 }
 
 /* ── Pintado del estado clínico ───────────────────────────────────────────── */

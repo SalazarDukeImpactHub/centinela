@@ -81,6 +81,10 @@ class SesionLlamada:
     grounding: dict | None = None
     segundos_audio: float = 0.0
     finalizada: bool = False
+    # Un turno a la vez por llamada. Sin esto, dos grabaciones enviadas seguidas
+    # se procesaban en paralelo sobre el mismo estado y las respuestas volvían
+    # encimadas — la conversación "se pegaba" y después hablaba varias veces.
+    turno_en_curso: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 @app.on_event("startup")
@@ -324,13 +328,22 @@ async def turno(llamada_id: str, audio: UploadFile) -> JSONResponse:
     La latencia que se reporta es la que el paciente percibe: desde que termina de
     hablar hasta que empieza a sonar el audio del agente.
     """
-    import time
-
     sesion = SERVICIOS.llamadas.get(llamada_id)
     if sesion is None:
         raise HTTPException(404, "llamada no encontrada")
     if sesion.finalizada:
         raise HTTPException(409, "la llamada ya fue finalizada")
+    if sesion.turno_en_curso.locked():
+        # El turno anterior sigue procesándose. Rechazar es mejor que encolar:
+        # una respuesta al turno de hace diez segundos ya no viene al caso.
+        raise HTTPException(429, "todavía estoy procesando lo anterior, un momento")
+
+    async with sesion.turno_en_curso:
+        return await _procesar_turno(sesion, audio)
+
+
+async def _procesar_turno(sesion: SesionLlamada, audio: UploadFile) -> JSONResponse:
+    import time
 
     metrica = sesion.registro.nuevo_turno()
     metrica.modelo = MODELO
