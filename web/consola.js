@@ -358,10 +358,13 @@ function pintar(d) {
   if (!d.grounding) {
     gate.innerHTML = '';
   } else if (d.grounding.permitido) {
+    // Dos orígenes distintos y se nombran distinto: respuesta sustentada a una
+    // pregunta del paciente, o protocolo que respalda el paso actual del triaje.
+    const esProtocolo = d.grounding.capa === 'protocolo';
     gate.innerHTML = `<div style="display:flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid var(--ok);background:var(--ok-bg);border-radius:var(--r1);margin-bottom:8px">
-      <span style="font-size:11.5px;font-weight:600;color:var(--ok-t)">Grounding suficiente</span>
+      <span style="font-size:11.5px;font-weight:600;color:var(--ok-t)">${esProtocolo ? 'Protocolo que respalda este paso' : 'Respuesta sustentada en el corpus'}</span>
       <span style="flex:1"></span>
-      <span class="mono" style="font-size:10.5px;color:var(--text-2)">${d.citas.length} fragmento(s)</span></div>`;
+      <span class="mono" style="font-size:10.5px;color:var(--text-2)">${esProtocolo ? esc(d.grounding.motivo) : d.citas.length + ' fragmento(s)'}</span></div>`;
   } else {
     gate.innerHTML = `<div class="dcin" style="border:1px solid var(--warn);background:var(--warn-bg);border-radius:var(--r1);padding:9px 10px;margin-bottom:8px">
       <div style="font-size:11.5px;font-weight:700;color:var(--warn-t)">Compuerta bloqueada — el agente respondió “no lo sé”</div>
@@ -437,9 +440,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /* ── Consola de conocimiento ──────────────────────────────────────────────── */
-async function cargarDocumentos() {
+async function cargarDocumentos(intento = 0) {
   try {
-    const d = await (await fetch('/api/documentos')).json();
+    const r = await fetch('/api/documentos');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
     $('kbDocs').textContent = d.total_documentos.toLocaleString('es');
     $('kbChunks').textContent = d.total_fragmentos.toLocaleString('es');
     $('kbPend').textContent = d.en_proceso;
@@ -458,7 +463,19 @@ async function cargarDocumentos() {
       b.onclick = () => borrar(b.dataset.borrar, b.dataset.nombre);
     });
   } catch (e) {
-    $('docs').innerHTML = `<div style="padding:24px;text-align:center;color:var(--crit-t)">No se pudo cargar el índice: ${esc(e.message)}</div>`;
+    // El servidor tarda ~40 s en arrancar (carga y calienta los modelos). Abrir
+    // esta vista durante ese lapso daba "Failed to fetch" y la consola quedaba
+    // muerta. Se reintenta con espera creciente en vez de rendirse a la primera.
+    if (intento < 6) {
+      const espera = Math.min(3000 * (intento + 1), 10000);
+      $('docs').innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">
+        Conectando con el servicio… reintento ${intento + 1} de 6
+        <div class="mono lbl" style="margin-top:6px">el arranque carga los modelos y toma unos segundos</div></div>`;
+      setTimeout(() => cargarDocumentos(intento + 1), espera);
+      return;
+    }
+    $('docs').innerHTML = `<div style="padding:24px;text-align:center;color:var(--crit-t)">No se pudo cargar el índice: ${esc(e.message)}
+      <div style="margin-top:8px"><button class="mono" onclick="cargarDocumentos()" style="padding:5px 12px;border:1px solid var(--line-2);background:var(--panel-2);border-radius:var(--r1);font-size:11px">Reintentar</button></div></div>`;
   }
 }
 

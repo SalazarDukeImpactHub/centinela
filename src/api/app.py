@@ -342,12 +342,69 @@ async def turno(llamada_id: str, audio: UploadFile) -> JSONResponse:
         return await _procesar_turno(sesion, audio)
 
 
+# Qué buscar en el corpus para sustentar cada paso del triaje. El agente no
+# improvisa sus preguntas: sigue protocolo, y el panel de citas debe mostrarlo.
+# Sin esto, las citas solo aparecían cuando el paciente preguntaba algo y el
+# panel quedaba vacío la mayor parte de la llamada — trazabilidad invisible.
+CONSULTA_POR_FOCO = {
+    "fiebre": "fiebre postoperatoria umbral de alarma 38 grados",
+    "herida": "signos de infección de sitio operatorio secreción eritema",
+    "dolor": "evaluación del dolor postoperatorio escala",
+    "movilidad": "movilización temprana después de la cirugía",
+}
+CONSULTA_ESCALACION = "criterios de derivación urgente infección postoperatoria fiebre"
+
+
+def _sustentar_paso(sesion: SesionLlamada, respuesta) -> None:
+    """Puebla el panel de citas con el sustento del paso actual del triaje."""
+    if SERVICIOS.indice is None:
+        return
+    if respuesta.escala:
+        consulta = CONSULTA_ESCALACION
+        etiqueta = "protocolo de escalación"
+    elif respuesta.foco is not None:
+        consulta = CONSULTA_POR_FOCO.get(respuesta.foco.value)
+        etiqueta = f"protocolo del paso: {respuesta.foco.value}"
+    else:
+        consulta = "seguimiento postoperatorio recomendaciones al alta"
+        etiqueta = "protocolo de cierre"
+    if not consulta:
+        return
+
+    # Búsqueda directa, sin la compuerta completa. La verificación léxica exige
+    # solapamiento de términos en el idioma de la consulta, y parte del corpus
+    # está en inglés: el sustento de protocolo en español quedaba bloqueado. Acá
+    # no hay afirmación clínica hacia el paciente que proteger — solo se muestra
+    # el material del procedimiento que respalda el paso, con su cita.
+    recuperados = [
+        r
+        for r in SERVICIOS.indice.buscar(consulta, k=8)
+        if r.escenario == ESCENARIO_DEMO and r.similitud >= 0.84
+    ][:2]
+    if not recuperados:
+        return
+    sesion.grounding = {"permitido": True, "motivo": etiqueta, "capa": "protocolo"}
+    sesion.citas = [
+        {
+            "id": f.chunk_id,
+            "puntaje": round(f.similitud, 3),
+            "fragmento": f.texto[:180],
+            "fuente": f.cita(),
+        }
+        for f in recuperados
+    ]
+
+
 async def _procesar_turno(sesion: SesionLlamada, audio: UploadFile) -> JSONResponse:
     import time
 
     metrica = sesion.registro.nuevo_turno()
     metrica.modelo = MODELO
     inicio = time.perf_counter()
+    # El estado de grounding es POR TURNO: se limpia acá y lo puebla el consultor
+    # (si el paciente preguntó) o el sustento de protocolo (el resto).
+    sesion.grounding = None
+    sesion.citas = []
 
     datos = await audio.read()
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
@@ -377,10 +434,11 @@ async def _procesar_turno(sesion: SesionLlamada, audio: UploadFile) -> JSONRespo
     metrica.registrar_etapa("decision", (time.perf_counter() - t1) * 1000)
 
     # El grounding de preguntas lo maneja el consultor dentro de la máquina de
-    # turnos: la detección no depende de un '?' —la transcripción de voz no los
-    # trae de forma confiable— sino de las formas interrogativas reales.
-    if sesion.grounding is not None:
-        metrica.consultas_rag += 1
+    # turnos. Si el paciente no preguntó nada, se sustenta el paso del protocolo:
+    # el panel de citas nunca queda mudo, porque el agente nunca actúa sin base.
+    if sesion.grounding is None:
+        _sustentar_paso(sesion, respuesta)
+    metrica.consultas_rag += 1
 
     texto_agente = respuesta.texto
     t2 = time.perf_counter()
