@@ -128,12 +128,40 @@ class TestAlarmasInmediatas:
     """La señal más urgente no puede esperar al modelo."""
 
     def test_la_alarma_escala_en_el_mismo_turno(self):
+        """La alerta se dispara ya, pero la llamada NO se corta.
+
+        Una enfermera que detecta una bandera roja no cuelga: completa la
+        valoración para que quien recibe la alerta tenga el cuadro entero.
+        """
         conv, cliente = _conversacion()
         conv.abrir()
         r = conv.responder("Doctora no puedo respirar bien, me falta el aire")
         assert r.escala
-        assert r.cierra
+        assert r.decision.semaforo is Semaforo.ROJO
         assert "dificultad_respiratoria" in r.alarmas_detectadas
+        assert not r.cierra, "colgó en vez de completar la valoración"
+        assert conv.estado.alerta_anunciada
+
+    def test_la_alerta_se_anuncia_una_sola_vez(self):
+        from src.conversacion.turno import ESCALAMIENTO
+
+        conv, _ = _conversacion()
+        conv.abrir()
+        primero = conv.responder("no puedo respirar")
+        conv.esperar_extraccion()
+        segundo = conv.responder("la herida se ve bien")
+        assert ESCALAMIENTO in primero.texto
+        assert ESCALAMIENTO not in segundo.texto, "repitió el anuncio de alerta"
+
+    def test_la_llamada_sigue_preguntando_tras_escalar(self):
+        """El equipo que recibe el aviso necesita más que el primer hallazgo."""
+        conv, _ = _conversacion()
+        conv.abrir()
+        conv.responder("no puedo respirar")
+        conv.esperar_extraccion()
+        r = conv.responder("la herida se ve bien")
+        assert r.foco is not None, "dejó de preguntar tras la alerta"
+        assert not r.cierra
 
     def test_la_alarma_no_depende_de_la_extraccion(self):
         """Aunque el modelo no haya respondido todavía, la alarma ya escaló."""
@@ -149,11 +177,12 @@ class TestAlarmasInmediatas:
         r = conv.responder("Anoche me desmayé en el baño")
         assert r.escala
         bajo = r.texto.lower()
+        # El anuncio dice que ya se reportó y que se sigue preguntando.
+        assert "reportando" in bajo or "reportado" in bajo
         # Invariantes del mensaje de escalación: nombra al equipo de salud, dice
         # qué va a pasar después, y NO tranquiliza — la rúbrica penaliza por
         # nombre la falsa tranquilidad ante un síntoma de alarma.
         assert "equipo" in bajo
-        assert "comunicar" in bajo or "llamar" in bajo
         assert "tranquil" not in bajo
         assert "no se preocupe" not in bajo
         assert "todo está bien" not in bajo
@@ -283,12 +312,24 @@ class TestCierre:
         assert "fiebre" in r.texto
         assert "especialista" in r.texto or "equipo de salud" in r.texto
 
-    def test_el_escalamiento_cierra_la_llamada(self):
+    def test_el_escalamiento_cierra_con_recapitulacion(self):
+        """Escalar no cuelga: la llamada completa la valoración y cierra
+        recapitulando lo que quedó reportado."""
+        from src.conversacion.turno import CIERRE_ROJO
+
         conv, _ = _conversacion()
         conv.abrir()
         r = conv.responder("me duele el pecho")
-        assert r.escala and r.cierra
-        assert conv.estado.cerrada
+        assert r.escala and not r.cierra
+
+        for respuesta in ["la herida se ve bien", "el dolor es un 2",
+                          "camino sin problema", "no, nada más"]:
+            conv.esperar_extraccion()
+            r = conv.responder(respuesta)
+            if r.cierra:
+                break
+        assert r.cierra and conv.estado.cerrada
+        assert r.texto == CIERRE_ROJO
 
     def test_la_transcripcion_registra_ambos_lados(self):
         conv, _ = _conversacion()

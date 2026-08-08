@@ -595,12 +595,41 @@ async def colgar(llamada_id: str) -> JSONResponse:
 
     estado = sesion.conversacion.estado
     decision = evaluar(estado.cuadro)
+    # Contexto para quien recibe la alerta. Un aviso que solo dice "fiebre 38"
+    # obliga a llamar de vuelta para saber lo básico: qué más se preguntó, qué
+    # dijo el paciente y qué quedó sin cubrir. Se arma desde el registro por
+    # turno, así que no puede afirmar nada que no haya ocurrido.
+    cronologia = [
+        {
+            "turno": t.turno,
+            "semaforo": t.semaforo,
+            "paciente": t.texto_paciente,
+            "agente": t.texto_agente,
+            "motivos": t.motivos,
+            "escalado": t.escalado,
+        }
+        for t in sesion.registro.turnos
+        if t.texto_paciente or t.escalado
+    ]
+    turno_alerta = next((t for t in cronologia if t["escalado"]), None)
+
     resumen = {
         "llamada_id": sesion.id,
         "escenario": estado.escenario,
         "semaforo_final": decision.semaforo.value,
         "motivos": decision.motivos,
         "escalado": decision.escala,
+        "alerta": {
+            "disparada_en_turno": turno_alerta["turno"] if turno_alerta else None,
+            "disparador": turno_alerta["motivos"] if turno_alerta else [],
+            "dicho_por_el_paciente": turno_alerta["paciente"] if turno_alerta else "",
+            "turnos_posteriores": (
+                len(cronologia) - turno_alerta["turno"] if turno_alerta else 0
+            ),
+        }
+        if decision.escala or turno_alerta
+        else None,
+        "cronologia": cronologia,
         "cuadro": {
             "dolor_nrs": estado.cuadro.dolor_nrs,
             "fiebre_c": estado.cuadro.fiebre_c,

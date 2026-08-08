@@ -170,11 +170,26 @@ APERTURA = (
 # Escalamiento: se nombra lo que pasa sin dramatizarlo, y sobre todo se dice qué
 # va a ocurrir después. Un paciente al que le anuncian que algo anda mal y no le
 # explican el siguiente paso se queda solo con el susto.
+# Escalamiento: se anuncia la alerta pero la llamada NO termina. Una enfermera
+# que detecta una bandera roja no cuelga: completa la valoración para que quien
+# reciba la alerta tenga el cuadro entero. Cortar acá dejaba al equipo médico
+# con un solo dato y sin contexto.
 ESCALAMIENTO = (
-    "Le agradezco que me lo cuente, porque eso sí hay que mirarlo hoy mismo. Lo "
-    "estoy reportando al equipo de salud en este momento, y se van a comunicar "
-    "con usted en breve. Mientras tanto no se aplique nada en la herida, y si se "
-    "siente peor no espere la llamada: consulte de una vez."
+    "Le agradezco que me lo cuente, porque eso sí hay que mirarlo hoy mismo. Ya "
+    "lo estoy reportando al equipo de salud. Permítame terminar de preguntarle "
+    "un par de cosas, así les paso la información completa."
+)
+
+# Cuando ya se avisó de la alerta y quedan preguntas, no se repite el anuncio:
+# se enlaza con lo que sigue.
+ESCALAMIENTO_EN_CURSO = "Sigo con la alerta abierta para el equipo."
+
+# Cierre de una llamada que escaló. Recapitula qué se reportó y qué sigue.
+CIERRE_ROJO = (
+    "Eso es todo lo que necesitaba preguntarle. Ya quedó reportado al equipo de "
+    "salud con todo lo que me contó, y se van a comunicar con usted hoy. "
+    "Mientras tanto no se aplique nada en la herida, y si se siente peor no "
+    "espere la llamada: consulte de una vez o vaya a urgencias."
 )
 
 CIERRE_VERDE = (
@@ -344,6 +359,9 @@ class EstadoLlamada:
     # El cierre se anuncia antes de ejecutarse: colgar en seco tras la última
     # pregunta deja al paciente con la palabra en la boca.
     despedida_ofrecida: bool = False
+    # La alerta al equipo se anuncia una sola vez; después la llamada sigue para
+    # completar la valoración.
+    alerta_anunciada: bool = False
     foco_actual: Foco | None = None
     cerrada: bool = False
     transcripcion: list[tuple[str, str]] = field(default_factory=list)
@@ -585,16 +603,27 @@ class Conversacion:
             respuesta_corpus = self.consultor(texto_paciente) if self.consultor else None
             prefijo = (respuesta_corpus or SIN_RESPUESTA) + " "
 
+        # La alerta se anuncia UNA vez y la conversación continúa: el equipo que
+        # recibe el aviso necesita el cuadro completo, no el primer hallazgo.
+        # Si ya no quedan preguntas, el cierre rojo recapitula y despide.
+        anuncio_alerta = ""
         if decision.escala:
-            self.estado.cerrada = True
-            self.estado.transcripcion.append(("agente", ESCALAMIENTO))
-            return RespuestaTurno(
-                texto=ESCALAMIENTO,
-                decision=decision,
-                escala=True,
-                cierra=True,
-                alarmas_detectadas=detectadas,
-            )
+            with self._lock:
+                primera_vez = not self.estado.alerta_anunciada
+                self.estado.alerta_anunciada = True
+                quedan_preguntas = self.estado.siguiente_foco() is not None
+            if primera_vez:
+                if not quedan_preguntas:
+                    self.estado.cerrada = True
+                    self.estado.transcripcion.append(("agente", ESCALAMIENTO))
+                    return RespuestaTurno(
+                        texto=ESCALAMIENTO,
+                        decision=decision,
+                        escala=True,
+                        cierra=True,
+                        alarmas_detectadas=detectadas,
+                    )
+                anuncio_alerta = ESCALAMIENTO + " "
 
         # 3c. Si la respuesta no aporta ningún dato del tema preguntado, se
         #     vuelve a preguntar en vez de avanzar. Una sola vez: insistir dos
@@ -612,7 +641,7 @@ class Conversacion:
             with self._lock:
                 self.estado.reintentados.add(foco_respondido_previo)
             variante = _elegir(PREGUNTAS[foco_respondido_previo])
-            texto = f"{NO_SE_ENTENDIO[foco_respondido_previo]} {variante}"
+            texto = f"{anuncio_alerta}{NO_SE_ENTENDIO[foco_respondido_previo]} {variante}"
             self.estado.transcripcion.append(("agente", texto))
             return RespuestaTurno(
                 texto=texto,
@@ -640,7 +669,7 @@ class Conversacion:
                     and "escalofri" in _sin_tildes(texto_paciente)
                     else ACUSE_PREOCUPACION
                 )
-                texto = f"{prefijo}{acuse_previo} {PEDIDOS_DE_DATO[pendiente]}"
+                texto = f"{anuncio_alerta}{prefijo}{acuse_previo} {PEDIDOS_DE_DATO[pendiente]}"
                 self.estado.transcripcion.append(("agente", texto))
                 return RespuestaTurno(
                     texto=texto,
@@ -663,8 +692,8 @@ class Conversacion:
                 with self._lock:
                     self.estado.foco_actual = None
                 texto = (
-                    f"{prefijo}Ya casi terminamos. Antes de despedirme: "
-                    "¿hay algo más que quiera contarme o preguntarme?"
+                    f"{anuncio_alerta}{prefijo}Ya casi terminamos. Antes de "
+                    "despedirme: ¿hay algo más que quiera contarme o preguntarme?"
                 )
                 self.estado.transcripcion.append(("agente", texto))
                 return RespuestaTurno(
@@ -690,12 +719,12 @@ class Conversacion:
             or _eco(texto_paciente, cifra_dicha, foco_respondido)
             or _elegir(ACUSES[decision.semaforo])
         )
-        texto = f"{prefijo}{acuse} {pregunta}"
+        texto = f"{anuncio_alerta}{prefijo}{acuse} {pregunta}"
         self.estado.transcripcion.append(("agente", texto))
         return RespuestaTurno(
             texto=texto,
             decision=decision,
-            escala=False,
+            escala=decision.escala,
             cierra=False,
             foco=foco,
             alarmas_detectadas=detectadas,
@@ -709,7 +738,7 @@ class Conversacion:
             self.estado.cerrada = True
 
         if decision.escala:
-            texto = ESCALAMIENTO
+            texto = CIERRE_ROJO
         elif decision.semaforo is Semaforo.AMARILLO:
             texto = CIERRE_AMARILLO
         else:

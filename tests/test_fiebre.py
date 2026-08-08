@@ -177,10 +177,14 @@ class TestTono:
     def test_el_escalamiento_dice_que_va_a_pasar_despues(self):
         """Anunciar que algo anda mal sin explicar el siguiente paso deja al
         paciente solo con el susto."""
-        from src.conversacion.turno import ESCALAMIENTO
+        from src.conversacion.turno import CIERRE_ROJO, ESCALAMIENTO
 
+        # El anuncio dice que ya se reportó y que la llamada continúa.
         assert "equipo de salud" in ESCALAMIENTO
-        assert "comunicar" in ESCALAMIENTO
+        assert "reportando" in ESCALAMIENTO
+        # El cierre dice qué sigue y cuándo consultar sin esperar.
+        assert "se van a comunicar" in CIERRE_ROJO
+        assert "urgencias" in CIERRE_ROJO
 
     def test_el_cierre_verde_advierte_cuando_volver_a_llamar(self):
         from src.conversacion.turno import CIERRE_VERDE
