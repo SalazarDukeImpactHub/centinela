@@ -308,3 +308,69 @@ class TestTemperaturaBaja:
             CuadroClinico(fiebre_c=36.5, dolor_nrs=1)
         )
         assert d.semaforo is Semaforo.VERDE
+
+
+class TestNumeroCompuesto:
+    """Whisper parte los números dictados: "treinta y cinco" llega como "30 y 5".
+
+    Caso real: el paciente repitió la cifra correcta cuatro veces —"3 y 5",
+    "30 y 5"— y el sistema la rechazó como imposible cada vez, dejándolo
+    atrapado en el bucle. La llamada terminó sin ningún dato clínico.
+    """
+
+    @pytest.mark.parametrize(
+        "texto,esperado",
+        [
+            ("30 y 5", 35.0),
+            ("3 y 5", 35.0),
+            ("30 y 8", 38.0),
+            ("38 y medio", 38.5),
+            ("40 y 1", 41.0),
+        ],
+    )
+    def test_formas_compuestas_en_digitos(self, texto: str, esperado: float):
+        from src.clinico.fiebre import extraer_cifra
+
+        assert extraer_cifra(texto, contexto_fiebre=True) == esperado
+
+    def test_la_cifra_compuesta_queda_registrada(self):
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="cholecystitis"))
+        conv.abrir()
+        conv.responder("escalofríos")
+        conv.esperar_extraccion()
+        conv.responder("30 y 5")
+        assert conv.estado.cuadro.fiebre_c == 35.0
+
+
+class TestTopeDeReintentosDeCifra:
+    """Insistir más de dos veces no obtiene el número: solo hostiga."""
+
+    def test_las_dos_frases_de_reintento_son_distintas(self):
+        from src.conversacion.turno import CIFRA_IMPOSIBLE
+
+        assert len(set(CIFRA_IMPOSIBLE)) == len(CIFRA_IMPOSIBLE)
+
+    def test_tras_dos_intentos_abandona_y_sigue(self):
+        from src.conversacion.turno import CIFRA_NO_OBTENIDA
+
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="cholecystitis"))
+        conv.abrir()
+        conv.responder("escalofríos")
+        conv.esperar_extraccion()
+        for _ in range(2):
+            conv.responder("75 grados")
+            conv.esperar_extraccion()
+        r = conv.responder("200 grados")
+        assert CIFRA_NO_OBTENIDA in r.texto
+        assert r.foco is not Foco.FIEBRE, "siguió atrapado en la temperatura"
+
+    def test_lo_dicho_queda_como_fiebre_referida(self):
+        """El dato no se pierde: sin cifra, sigue siendo fiebre sin medir."""
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="cholecystitis"))
+        conv.abrir()
+        conv.responder("escalofríos")
+        conv.esperar_extraccion()
+        for texto in ["75 grados", "200 grados", "1000 grados"]:
+            conv.responder(texto)
+            conv.esperar_extraccion()
+        assert conv.estado.cuadro.fiebre_referida_sin_medir

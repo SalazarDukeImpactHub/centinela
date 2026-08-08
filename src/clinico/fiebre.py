@@ -200,6 +200,27 @@ def extraer_cifra(texto: str, *, contexto_fiebre: bool = False) -> float | None:
             and "termometro" not in normalizado and not tiene_cifra(normalizado):
         return None
 
+    # Formas compuestas en dígitos, como las produce Whisper cuando el paciente
+    # dicta el número por partes. Caso real: "treinta y cinco" llegó como
+    # "30 y 5" y también como "3 y 5", y ambas se rechazaban como imposibles
+    # mientras el paciente repetía la cifra correcta una y otra vez.
+    m = re.search(r"\b(\d{1,2})\s*y\s*(\d)\b", normalizado)
+    if m:
+        primero, unidad = int(m.group(1)), int(m.group(2))
+        if primero in (30, 40):          # "30 y 5" -> 35
+            candidato = primero + unidad
+        elif primero in (3, 4):          # "3 y 5"  -> 35 (dicta dígito a dígito)
+            candidato = primero * 10 + unidad
+        else:
+            candidato = None
+        if candidato is not None and 31 <= candidato <= 42:
+            return float(candidato)
+
+    # "38 y medio" en dígitos: el regex principal tomaría el 38 y perdería el medio.
+    m = re.search(r"\b(3[1-9]|4[0-2])\s*y\s*medio\b", normalizado)
+    if m:
+        return float(m.group(1)) + 0.5
+
     m = _RE_DIGITOS.search(normalizado)
     if m:
         entero = int(m.group(1))

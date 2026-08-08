@@ -152,9 +152,24 @@ NO_SE_ENTENDIO: dict[Foco, str] = {
 }
 
 # Temperatura fuera del rango humano: casi siempre error de transcripción.
+# Se pide confirmación DOS veces como máximo y con frases distintas. En llamada
+# real, cuatro "¿me repite el número?" idénticos dejaron al paciente atrapado
+# repitiendo una cifra que el sistema no sabía leer — y la llamada terminó sin
+# ningún dato clínico. Insistir más allá de dos veces no obtiene el número: solo
+# hostiga y desperdicia la llamada.
 CIFRA_IMPOSIBLE = (
     "Perdón, entendí {valor} grados y eso no puede ser. ¿Me repite el número, "
-    "más despacio?"
+    "más despacio?",
+    "Sigo sin captarlo bien. Dígame solo los dos números, por ejemplo: "
+    "treinta y ocho.",
+)
+
+# Tras dos intentos fallidos se sigue adelante: el dato queda como fiebre
+# referida sin medir —que es la verdad— y la valoración continúa en vez de
+# quedarse trabada. Lo que no se pudo obtener queda en el resumen.
+CIFRA_NO_OBTENIDA = (
+    "No importa, no nos quedemos en el número. Lo anoto como fiebre sin medir y "
+    "el equipo lo revisa."
 )
 
 # Apertura: se presenta con nombre y rol, dice qué va a hacer y ofrece ayuda.
@@ -358,6 +373,9 @@ class EstadoLlamada:
     # La alerta al equipo se anuncia una sola vez; después la llamada sigue para
     # completar la valoración.
     alerta_anunciada: bool = False
+    # Veces que se pidió confirmar una temperatura ilegible. Con tope: insistir
+    # más allá de dos no obtiene el número, solo hostiga.
+    intentos_cifra: int = 0
     foco_actual: Foco | None = None
     cerrada: bool = False
     transcripcion: list[tuple[str, str]] = field(default_factory=list)
@@ -507,6 +525,8 @@ class Conversacion:
                 ]
                 self.estado.cuadro.sintomas_alarma.extend(nuevas)
 
+        prefijo_cifra = ""
+
         # 1b. Fiebre en código y en este mismo turno, en sus dos variantes.
         #     Por la vía de la extracción ambas llegarían un turno tarde.
         #     - Cifra dicha en voz alta: decide el semáforo YA. "Tuve 38" seguido
@@ -559,19 +579,31 @@ class Conversacion:
         if en_contexto_fiebre and cifra_dicha is None and intensidad is None:
             imposible = fiebre.cifra_imposible(texto_paciente)
             if imposible is not None:
-                valor = int(imposible) if imposible == int(imposible) else imposible
                 with self._lock:
+                    self.estado.intentos_cifra += 1
+                    intentos = self.estado.intentos_cifra
+                    # Intentarlo es correcto; encerrar al paciente en el bucle no.
+                    # Lo dicho ya es fiebre referida: eso queda registrado igual.
+                    self.estado.cuadro.fiebre_referida_sin_medir = True
                     decision_actual = evaluar(self.estado.cuadro)
-                texto = CIFRA_IMPOSIBLE.format(valor=valor)
-                self.estado.transcripcion.append(("agente", texto))
-                return RespuestaTurno(
-                    texto=texto,
-                    decision=decision_actual,
-                    escala=False,
-                    cierra=False,
-                    foco=Foco.FIEBRE,
-                    alarmas_detectadas=detectadas,
-                )
+
+                if intentos <= len(CIFRA_IMPOSIBLE):
+                    valor = int(imposible) if imposible == int(imposible) else imposible
+                    texto = CIFRA_IMPOSIBLE[intentos - 1].format(valor=valor)
+                    self.estado.transcripcion.append(("agente", texto))
+                    return RespuestaTurno(
+                        texto=texto,
+                        decision=decision_actual,
+                        escala=decision_actual.escala,
+                        cierra=False,
+                        foco=Foco.FIEBRE,
+                        alarmas_detectadas=detectadas,
+                    )
+                # Agotados los intentos: se abandona el número y se sigue.
+                with self._lock:
+                    self.estado.datos_pedidos.add(Foco.FIEBRE)
+                    self.estado.preguntados.add(Foco.FIEBRE)
+                prefijo_cifra = CIFRA_NO_OBTENIDA + " "
 
         # 2. La extracción arranca en segundo plano y no bloquea nada.
         self._extraer_en_segundo_plano(texto_paciente, foco_previo)
@@ -631,6 +663,8 @@ class Conversacion:
             foco_respondido_previo is not None
             and not decision.escala
             and not prefijo
+            and not prefijo_cifra  # ya se abandonó la cifra: no reintentar encima
+            and cifra_dicha is None  # una cifra captada ES el dato
             and not _aporta_dato(texto_paciente, foco_respondido_previo)
             and foco_respondido_previo not in self.estado.reintentados
         ):
@@ -665,7 +699,7 @@ class Conversacion:
                     and "escalofri" in _sin_tildes(texto_paciente)
                     else ACUSE_PREOCUPACION
                 )
-                texto = f"{anuncio_alerta}{prefijo}{acuse_previo} {PEDIDOS_DE_DATO[pendiente]}"
+                texto = f"{anuncio_alerta}{prefijo_cifra}{prefijo}{acuse_previo} {PEDIDOS_DE_DATO[pendiente]}"
                 self.estado.transcripcion.append(("agente", texto))
                 return RespuestaTurno(
                     texto=texto,
@@ -715,7 +749,7 @@ class Conversacion:
             or _eco(texto_paciente, cifra_dicha, foco_respondido)
             or _elegir(ACUSES[decision.semaforo])
         )
-        texto = f"{anuncio_alerta}{prefijo}{acuse} {pregunta}"
+        texto = f"{anuncio_alerta}{prefijo_cifra}{prefijo}{acuse} {pregunta}"
         self.estado.transcripcion.append(("agente", texto))
         return RespuestaTurno(
             texto=texto,
