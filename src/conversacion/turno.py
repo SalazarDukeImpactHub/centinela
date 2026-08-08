@@ -164,7 +164,7 @@ CIFRA_IMPOSIBLE = (
 APERTURA = (
     "Buenos días, le habla Centinela, su agente encargado del seguimiento de su "
     "cirugía. Voy a hacerle unas preguntas para ver cómo va su recuperación y si "
-    "puedo ayudarle en algo."
+    "puedo ayudarle."
 )
 
 # Escalamiento: se nombra lo que pasa sin dramatizarlo, y sobre todo se dice qué
