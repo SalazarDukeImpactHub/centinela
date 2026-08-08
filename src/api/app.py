@@ -82,6 +82,7 @@ class SesionLlamada:
     grounding: dict | None = None
     segundos_audio: float = 0.0
     finalizada: bool = False
+    repeticiones: int = 0
     # Un turno a la vez por llamada. Sin esto, dos grabaciones enviadas seguidas
     # se procesaban en paralelo sobre el mismo estado y las respuestas volvían
     # encimadas — la conversación "se pegaba" y después hablaba varias veces.
@@ -213,6 +214,14 @@ def _estado_publico(sesion: SesionLlamada) -> dict:
         )
 
     totales = sesion.registro.totales()
+    # El consumo del modelo sale del acumulador vivo de la conversación: la
+    # extracción corre en un hilo de fondo y sus tokens del turno actual todavía
+    # no están en el registro cuando esta respuesta viaja. El registro JSONL
+    # queda consistente por delta al turno siguiente.
+    uso = sesion.conversacion.uso_modelo
+    totales["llamadas_modelo"] = uso["llamadas"]
+    totales["tokens_entrada"] = uso["tokens_entrada"]
+    totales["tokens_salida"] = uso["tokens_salida"]
     return {
         "llamada_id": sesion.id,
         "finalizada": sesion.finalizada,
@@ -440,6 +449,10 @@ async def _procesar_turno(sesion: SesionLlamada, audio: UploadFile) -> JSONRespo
     # (si el paciente preguntó) o el sustento de protocolo (el resto).
     sesion.grounding = None
     sesion.citas = []
+    # Consumo del modelo por delta: la extracción del turno ANTERIOR ya terminó,
+    # así que la diferencia del acumulador se atribuye a este registro. El JSONL
+    # suma exacto aunque cada turno llegue con un turno de rezago.
+    uso_previo = dict(sesion.conversacion.uso_modelo)
 
     datos = await audio.read()
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
@@ -465,7 +478,18 @@ async def _procesar_turno(sesion: SesionLlamada, audio: UploadFile) -> JSONRespo
         # créditos de subtítulos. Pasó en prueba real: un "." consumió el turno
         # de movilidad y la llamada cerró sin ese dato. La respuesta correcta es
         # pedir que repita, POR VOZ y sin consumir el turno clínico.
-        texto_repetir = "Perdón, no le escuché bien. ¿Me lo puede repetir?"
+        sesion.repeticiones += 1
+        # La segunda vez cambia la frase y sugiere el modo manual: repetir
+        # identico "Perdon, no le escuche" dos veces seguidas suena a disco
+        # rayado y no ayuda a resolver el problema de fondo (ruido, microfono).
+        variantes = (
+            "Perdón, no le escuché bien. ¿Me lo puede repetir?",
+            "Sigo sin escucharle. Acérquese al micrófono, o mantenga presionado "
+            "el botón de hablar mientras me responde.",
+            "Parece que hay ruido en la línea. Tómese su tiempo y repítame lo "
+            "último, por favor.",
+        )
+        texto_repetir = variantes[min(sesion.repeticiones - 1, len(variantes) - 1)]
         audio_b64, _ = _sintetizar(texto_repetir)
         sesion.conversacion.estado.transcripcion.append(("agente", texto_repetir))
         metrica.latencia_ms = (time.perf_counter() - inicio) * 1000
@@ -501,6 +525,10 @@ async def _procesar_turno(sesion: SesionLlamada, audio: UploadFile) -> JSONRespo
     metrica.latencia_ms = (time.perf_counter() - inicio) * 1000
     metrica.semaforo = respuesta.decision.semaforo.value
     metrica.escalado = respuesta.escala
+    uso_actual = sesion.conversacion.uso_modelo
+    metrica.llamadas_modelo = uso_actual["llamadas"] - uso_previo["llamadas"]
+    metrica.tokens_entrada = uso_actual["tokens_entrada"] - uso_previo["tokens_entrada"]
+    metrica.tokens_salida = uso_actual["tokens_salida"] - uso_previo["tokens_salida"]
     sesion.registro.persistir(metrica)
 
     if respuesta.cierra:

@@ -164,10 +164,10 @@ class TestTono:
             T.CIERRE_VERDE,
             T.CIERRE_AMARILLO,
             T.ACUSE_PREOCUPACION,
-            *T.PREGUNTAS.values(),
-            *T.REPREGUNTAS.values(),
+            *(v for variantes in T.PREGUNTAS.values() for v in variantes),
+            *(v for variantes in T.REPREGUNTAS.values() for v in variantes),
             *T.PEDIDOS_DE_DATO.values(),
-            *T.ACUSES.values(),
+            *(v for variantes in T.ACUSES.values() for v in variantes),
         ]
         prohibidas = ("tienes", "puedes", "sientes", "estás", "tuyo", "contigo")
         for frase in frases:

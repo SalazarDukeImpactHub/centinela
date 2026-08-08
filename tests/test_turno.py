@@ -197,16 +197,18 @@ class TestExtraccionEnSegundoPlano:
             if r.cierra:
                 break
 
-        assert any(REPREGUNTAS[foco_inicial] in t for t in dichos), (
-            "el tema evadido nunca se repreguntó"
-        )
+        assert any(
+            any(variante in dicho for variante in REPREGUNTAS[foco_inicial])
+            for dicho in dichos
+        ), "el tema evadido nunca se repreguntó"
 
     def test_la_repregunta_cambia_las_palabras(self):
         """Insistir con la misma frase a quien ya minimizó no sirve de nada."""
         from src.conversacion.turno import PREGUNTAS, REPREGUNTAS
 
         for foco in ORDEN_FOCOS:
-            assert PREGUNTAS[foco] != REPREGUNTAS[foco]
+            # Pools disjuntos: ninguna repregunta repite una pregunta original.
+            assert not set(PREGUNTAS[foco]) & set(REPREGUNTAS[foco])
 
 
 class TestCierre:

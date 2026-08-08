@@ -201,8 +201,8 @@ const descartarGrabacion = () => {
  * el agente hablando — el parlante haría eco). Arranca a grabar tras ~250 ms de
  * voz sostenida y corta tras 1.5 s de silencio. El botón sigue funcionando como
  * modo manual por si el ambiente es ruidoso. */
-const UMBRAL_VOZ = 0.028;
-const VOZ_PARA_ARRANCAR_MS = 250;
+const UMBRAL_VOZ = 0.032;
+const VOZ_PARA_ARRANCAR_MS = 350;
 const SILENCIO_PARA_CORTAR_MS = 1500;
 const TURNO_MAXIMO_MS = 30000;
 

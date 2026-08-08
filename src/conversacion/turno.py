@@ -34,7 +34,10 @@ latencia.
 
 from __future__ import annotations
 
+import random
+import re as _re
 import threading
+import unicodedata as _unicodedata
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -61,23 +64,55 @@ class Foco(str, Enum):
 # preguntan temprano. Si la llamada se corta, lo crítico ya está preguntado.
 ORDEN_FOCOS = [Foco.FIEBRE, Foco.HERIDA, Foco.DOLOR, Foco.MOVILIDAD]
 
-# Las preguntas van en lenguaje de paciente, no de historia clínica. Se evita
-# "¿ha presentado?" y "refiera usted": nadie habla así por teléfono.
-PREGUNTAS: dict[Foco, str] = {
-    Foco.FIEBRE: "Cuénteme, ¿ha tenido fiebre o escalofríos estos días?",
-    Foco.HERIDA: "¿Y cómo ve la herida? Me interesa si está roja, hinchada o si le sale algún líquido.",
-    Foco.DOLOR: "Hablemos del dolor. Si cero es nada y diez es lo más fuerte que ha sentido, ¿en cuánto lo pondría ahora?",
-    Foco.MOVILIDAD: "¿Se ha podido mover y caminar como esperaba?",
+# Las preguntas van en lenguaje de paciente, no de historia clínica, y cada foco
+# tiene VARIANTES: probado en llamada real, el guion de frase única suena a
+# robot leyendo un formulario. Cada llamada elige al azar, así dos llamadas del
+# mismo día no suenan idénticas y la repregunta nunca repite palabras.
+PREGUNTAS: dict[Foco, tuple[str, ...]] = {
+    Foco.FIEBRE: (
+        "Cuénteme, ¿ha tenido fiebre o escalofríos estos días?",
+        "Arranquemos por lo más importante: ¿fiebre o escalofríos ha tenido?",
+        "¿Cómo ha estado de temperatura? ¿Fiebre, escalofríos, algo de eso?",
+    ),
+    Foco.HERIDA: (
+        "¿Y cómo ve la herida? Me interesa si está roja, hinchada o si le sale algún líquido.",
+        "Hábleme de la herida: ¿la ha visto roja, hinchada, o con algún líquido?",
+        "¿Qué tal la herida? Cuénteme cómo la ve usted.",
+    ),
+    Foco.DOLOR: (
+        "Hablemos del dolor. Si cero es nada y diez es lo más fuerte que ha sentido, ¿en cuánto lo pondría ahora?",
+        "¿Y de dolor cómo vamos? Del cero al diez, ¿en cuánto lo siente?",
+        "Cuénteme del dolor: ¿en una escala de cero a diez, dónde lo pondría?",
+    ),
+    Foco.MOVILIDAD: (
+        "¿Se ha podido mover y caminar como esperaba?",
+        "¿Y para moverse? ¿Camina, se levanta sin problema?",
+        "¿Cómo va con el movimiento? ¿Se puede parar y caminar?",
+    ),
 }
 
-# Repregunta cuando el paciente esquiva. No repite la misma frase: insistir con las
-# mismas palabras a alguien que ya minimizó no funciona.
-REPREGUNTAS: dict[Foco, str] = {
-    Foco.FIEBRE: "Se lo pregunto de otra manera: ¿en algún momento se sintió caliente o destemplado?",
-    Foco.HERIDA: "¿La ha alcanzado a mirar hoy? Con saber de qué color está me ayuda bastante.",
-    Foco.DOLOR: "Aunque sea por encimita: ¿el dolor lo deja dormir y moverse tranquilo?",
-    Foco.MOVILIDAD: "¿Se levanta de la cama sin que nadie lo ayude?",
+REPREGUNTAS: dict[Foco, tuple[str, ...]] = {
+    Foco.FIEBRE: (
+        "Se lo pregunto de otra manera: ¿en algún momento se sintió caliente o destemplado?",
+        "A ver, dígame esto: ¿anoche o hoy sintió el cuerpo caliente o con frío raro?",
+    ),
+    Foco.HERIDA: (
+        "¿La ha alcanzado a mirar hoy? Con saber de qué color está me ayuda bastante.",
+        "Cuando pueda mírela un momento: ¿se ve rosada normal, o roja, o con algo saliendo?",
+    ),
+    Foco.DOLOR: (
+        "Aunque sea por encimita: ¿el dolor lo deja dormir y moverse tranquilo?",
+        "Dígame al menos esto: ¿el dolor lo dejó dormir anoche?",
+    ),
+    Foco.MOVILIDAD: (
+        "¿Se levanta de la cama sin que nadie lo ayude?",
+        "¿Puede ir al baño y volver por su cuenta?",
+    ),
 }
+
+
+def _elegir(opciones: tuple[str, ...]) -> str:
+    return random.choice(opciones)
 
 # Repregunta por DATO FALTANTE: el paciente respondió, pero sin la cifra que la
 # decisión necesita. Es distinto de la evasión — acá sí quiere colaborar.
@@ -134,11 +169,50 @@ CIERRE_AMARILLO = (
 # el paciente sepa que se le escuchó, y llenar el silencio mientras la extracción
 # corre por detrás. La rúbrica pregunta explícitamente qué hace la solución
 # durante los silencios.
-ACUSES = {
-    Semaforo.VERDE: "Listo, gracias.",
-    Semaforo.AMARILLO: "Bueno, eso me sirve saberlo.",
-    Semaforo.ROJO: "Entiendo, eso sí es importante.",
+ACUSES: dict[Semaforo, tuple[str, ...]] = {
+    Semaforo.VERDE: ("Listo, gracias.", "Perfecto, anotado.", "Muy bien."),
+    Semaforo.AMARILLO: (
+        "Bueno, eso me sirve saberlo.",
+        "Lo dejo anotado para el equipo.",
+        "Vale, eso lo tengo en cuenta.",
+    ),
+    Semaforo.ROJO: ("Entiendo, eso sí es importante.",),
 }
+
+# Eco de lo escuchado: confirmar el dato concreto que el paciente acaba de dar
+# antes de cambiar de tema. Es la diferencia entre "Listo, gracias" a todo —que
+# suena a formulario— y una conversación donde consta que se escuchó. Se
+# construye desde las señales DETECTADAS EN CÓDIGO, nunca desde el modelo: un
+# eco inventado sería peor que ninguno.
+_ECOS_HERIDA = [
+    (_re.compile(r"roja|colorad|enrojecid"), "Me dice que la ve roja."),
+    (_re.compile(r"hinchad|inflamad"), "Hinchada, entiendo."),
+    (_re.compile(r"liquido|supurand|saliendo|amarillo|verdoso|pus"), "Eso que le sale lo anoto tal cual."),
+    (_re.compile(r"seca|bien|limpia|normal|cicatrizando"), "La ve tranquila, qué bueno."),
+]
+
+
+def _sin_tildes(texto: str) -> str:
+    plano = _unicodedata.normalize("NFD", texto.lower())
+    return "".join(c for c in plano if _unicodedata.category(c) != "Mn")
+
+
+def _eco(texto_paciente: str, cifra_dicha: float | None, foco: Foco | None) -> str | None:
+    """Frase corta que refleja el dato concreto recién escuchado, o None."""
+    if cifra_dicha is not None:
+        entero = int(cifra_dicha) if cifra_dicha == int(cifra_dicha) else cifra_dicha
+        return f"{entero}, listo."
+    if foco is Foco.HERIDA:
+        plano = _sin_tildes(texto_paciente)
+        for patron, frase in _ECOS_HERIDA:
+            if patron.search(plano):
+                return frase
+    if foco is Foco.DOLOR:
+        plano = _sin_tildes(texto_paciente)
+        numeros = _re.findall(r"\b([0-9]|10)\b", plano)
+        if numeros:
+            return f"Un {numeros[0]} de dolor, anotado."
+    return None
 
 # Acuse cuando el paciente cuenta algo que preocupa. Reconoce lo que dijo antes
 # de seguir preguntando: pasar de largo suena a formulario.
@@ -226,6 +300,11 @@ class Conversacion:
         self.consultor = consultor
         self._extraccion: threading.Thread | None = None
         self._lock = threading.Lock()
+        # Consumo acumulado del modelo. La extracción corre en un hilo de fondo
+        # y sin este acumulador sus tokens no llegaban ni al pie de la consola
+        # ni al registro — y las métricas de consumo son obligatorias en el
+        # README, contrastadas contra los logs.
+        self.uso_modelo = {"llamadas": 0, "tokens_entrada": 0, "tokens_salida": 0}
 
     def abrir(self) -> RespuestaTurno:
         """Primer turno: saludo más la primera pregunta, sin tocar el modelo."""
@@ -233,7 +312,7 @@ class Conversacion:
         self.estado.foco_actual = foco
         if foco:
             self.estado.preguntados.add(foco)
-        texto = f"{APERTURA} {PREGUNTAS[foco]}" if foco else APERTURA
+        texto = f"{APERTURA} {_elegir(PREGUNTAS[foco])}" if foco else APERTURA
         self.estado.transcripcion.append(("agente", texto))
         return RespuestaTurno(
             texto=texto,
@@ -251,11 +330,14 @@ class Conversacion:
                 self.cliente,
                 texto,
                 previo=self.estado.cuadro,
-                pregunta_agente=PREGUNTAS.get(foco) if foco else None,
+                pregunta_agente=PREGUNTAS[foco][0] if foco else None,
                 foco=foco.value if foco else None,
             )
             with self._lock:
                 self.estado.cuadro = resultado.cuadro
+                self.uso_modelo["llamadas"] += 1
+                self.uso_modelo["tokens_entrada"] += resultado.respuesta.tokens_entrada
+                self.uso_modelo["tokens_salida"] += resultado.respuesta.tokens_salida
                 if resultado.evasivo and foco and foco not in self.estado.repreguntados:
                     # Evasión detectada: el foco vuelve a la cola para repreguntar.
                     self.estado.preguntados.discard(foco)
@@ -368,12 +450,18 @@ class Conversacion:
             return self._cerrar(decision)
 
         es_repregunta = foco in self.estado.repreguntados
-        pregunta = (REPREGUNTAS if es_repregunta else PREGUNTAS)[foco]
+        pregunta = _elegir((REPREGUNTAS if es_repregunta else PREGUNTAS)[foco])
         with self._lock:
             self.estado.preguntados.add(foco)
+            foco_respondido = self.estado.foco_actual
             self.estado.foco_actual = foco
 
-        texto = f"{prefijo}{ACUSES[decision.semaforo]} {pregunta}"
+        # El acuse refleja el dato recien escuchado cuando lo hay; si no, una
+        # variante generica. "34, listo" vale mas que tres "Listo, gracias".
+        acuse = _eco(texto_paciente, cifra_dicha, foco_respondido) or _elegir(
+            ACUSES[decision.semaforo]
+        )
+        texto = f"{prefijo}{acuse} {pregunta}"
         self.estado.transcripcion.append(("agente", texto))
         return RespuestaTurno(
             texto=texto,
