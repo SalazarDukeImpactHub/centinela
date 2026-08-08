@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 
 from src.clinico import alarmas
+from src.clinico import fiebre as fiebre_deteccion
 from src.clinico.escalamiento import CuadroClinico, Herida, Movilidad
 from src.modelo.cliente import ClienteLocal, Respuesta
 
@@ -276,6 +277,17 @@ def extraer(
         # El esquema forzado lo vuelve improbable, pero un fallo de extracción no
         # puede degradar en un cuadro "normal" inventado: se devuelve desconocido.
         crudo = {}
+
+    # VALIDACIÓN CONTRA EL TEXTO CRUDO: el modelo no puede introducir un número
+    # que el paciente nunca dijo. Medido: ante "me sentí muy afiebrada" —sin
+    # cifra— el 3B extrajo fiebre_c=38, un valor inventado que quedó mandando
+    # sobre la corrección posterior del paciente y disparó un escalamiento con
+    # motivo falso. Si el texto no trae cifra, la sospecha queda como lo que es.
+    if crudo.get("fiebre_c") is not None and not fiebre_deteccion.tiene_cifra(
+        texto_paciente
+    ):
+        crudo["fiebre_c"] = None
+        crudo["menciona_fiebre_sin_medir"] = True
 
     # Los síntomas de alarma NO los produce el modelo: se detectan sobre el texto
     # crudo del paciente. Si el modelo cayera por completo, esta señal sobrevive.

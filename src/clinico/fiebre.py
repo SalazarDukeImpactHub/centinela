@@ -97,25 +97,42 @@ def refiere_fiebre_sin_cifra(texto: str) -> bool:
 
 
 # Números en palabras, como llegan por teléfono: "treinta y ocho y medio".
+# El rango cubre 31-42: un paciente puede reportar 34 —hipotermia o termómetro
+# mal puesto— y descartarlo por fuera de rango fue un bug real: el valor
+# inventado por el modelo quedó mandando sobre la corrección del paciente.
 _PALABRA_A_NUMERO = {
+    "uno": 31, "dos": 32, "tres": 33, "cuatro": 34,
     "cinco": 35, "seis": 36, "siete": 37, "ocho": 38, "nueve": 39,
 }
-_RE_DIGITOS = re.compile(r"\b(3[5-9]|4[0-2])(?:[.,](\d))?\b")
+# El lookahead negativo descarta números con unidad ajena a la temperatura:
+# "camino 40 minutos al día" contiene un 40 que no es fiebre. Sin esto, cualquier
+# cifra del rango en cualquier contexto se tomaba como temperatura.
+_RE_DIGITOS = re.compile(
+    r"\b(3[1-9]|4[0-2])(?:[.,](\d))?\b"
+    r"(?!\s*(?:minut|hora|dia|semana|mes|año|kilo|libra|pastilla|gota|vez|vece|paso|metro|cuadra|peso|mil))"
+)
 _RE_PALABRAS = re.compile(
-    r"treinta\s+y\s+(cinco|seis|siete|ocho|nueve)(\s+(y\s+medio|punto\s+(\d)|coma\s+(\d)))?"
+    r"treinta\s+y\s+(uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)"
+    r"(\s+(y\s+medio|punto\s+(\d)|coma\s+(\d)))?"
 )
 
 
-def extraer_cifra(texto: str) -> float | None:
+def extraer_cifra(texto: str, *, contexto_fiebre: bool = False) -> float | None:
     """Extrae la temperatura dicha, en dígitos o en palabras. None si no hay.
 
     Existe porque la cifra dicha en voz alta no puede esperar a la extracción del
     modelo: "tuve 38" seguido de "Listo, gracias, ¿y la herida?" y un escalamiento
     un turno después suena a que el agente no escuchó el dato más importante de la
     llamada. El umbral está en 38.0 — esta cifra decide el semáforo YA.
+
+    `contexto_fiebre`: el agente ACABA de pedir la temperatura, así que un número
+    pelado —"34."— es la respuesta aunque no venga con la palabra fiebre. Sin
+    este contexto, la respuesta directa del paciente a la pregunta directa del
+    agente se descartaba.
     """
     normalizado = _normalizar(texto)
-    if not menciona_fiebre(normalizado) and "temperatura" not in normalizado \
+    if not contexto_fiebre and not menciona_fiebre(normalizado) \
+            and "temperatura" not in normalizado \
             and "termometro" not in normalizado and not tiene_cifra(normalizado):
         return None
 

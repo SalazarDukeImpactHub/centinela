@@ -228,3 +228,78 @@ class TestCifraDicha:
         r = conv.responder("me la tomé y estaba en 36.7, normal")
         assert not r.escala
         assert PEDIDOS_DE_DATO[Foco.FIEBRE] not in r.texto
+
+
+class TestValidacionContraTextoCrudo:
+    """El modelo no puede introducir un número que el paciente nunca dijo.
+
+    El caso real: ante 'me sentí muy afiebrada' —sin cifra— el 3B extrajo
+    fiebre_c=38. Ese valor inventado quedó mandando sobre la corrección
+    posterior del paciente ('34') y disparó un escalamiento cuyo registro decía
+    'fiebre ≥ 38' cuando el paciente había dicho 34. La rúbrica penaliza los
+    registros que no cuadran con la conversación.
+    """
+
+    def test_el_numero_alucinado_se_descarta(self):
+        from src.clinico.extraccion import extraer
+
+        class ModeloQueAlucina:
+            def generar(self, prompt, **kwargs):
+                from src.modelo.cliente import Respuesta
+
+                return Respuesta(
+                    '{"fiebre_c": 38, "menciona_fiebre_sin_medir": true, "evasivo": false}',
+                    10, 5, 1.0, "falso",
+                )
+
+        r = extraer(ModeloQueAlucina(), "me sentí muy afiebrada", foco="fiebre")
+        assert r.cuadro.fiebre_c is None, "aceptó una cifra que el paciente no dijo"
+        assert r.cuadro.fiebre_referida_sin_medir
+
+    def test_la_cifra_real_del_texto_si_se_acepta(self):
+        from src.clinico.extraccion import extraer
+
+        class ModeloFiel:
+            def generar(self, prompt, **kwargs):
+                from src.modelo.cliente import Respuesta
+
+                return Respuesta(
+                    '{"fiebre_c": 38.5, "menciona_fiebre_sin_medir": false, "evasivo": false}',
+                    10, 5, 1.0, "falso",
+                )
+
+        r = extraer(ModeloFiel(), "me dio 38.5 anoche", foco="fiebre")
+        assert r.cuadro.fiebre_c == 38.5
+
+
+class TestRespuestaDirectaConNumeroPelado:
+    def test_34_pelado_se_entiende_como_temperatura(self):
+        """La respuesta directa a la pregunta directa: '34.' sin más palabras."""
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="cholecystitis"))
+        conv.abrir()
+        conv.responder("tuve fiebre anoche")  # pide la cifra
+        conv.esperar_extraccion()
+        r = conv.responder("34.")
+        assert conv.estado.cuadro.fiebre_c == 34.0
+        assert not r.escala
+        assert any("baja" in m for m in r.decision.motivos)
+
+    def test_un_numero_pelado_fuera_de_contexto_no_es_temperatura(self):
+        from src.clinico.fiebre import extraer_cifra
+
+        assert extraer_cifra("camino 40 minutos al día") is None
+        assert extraer_cifra("40", contexto_fiebre=True) == 40.0
+
+
+class TestTemperaturaBaja:
+    def test_34_es_amarillo_no_verde(self):
+        """Hipotermia o termómetro mal puesto: ninguna de las dos se ignora."""
+        d = evaluar(CuadroClinico(fiebre_c=34.0))
+        assert d.semaforo is Semaforo.AMARILLO
+        assert any("baja" in m for m in d.motivos)
+
+    def test_36_5_sigue_siendo_verde(self):
+        d = evaluar(
+            CuadroClinico(fiebre_c=36.5, dolor_nrs=1)
+        )
+        assert d.semaforo is Semaforo.VERDE

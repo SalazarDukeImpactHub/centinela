@@ -135,21 +135,35 @@ class TestCaminoCritico:
 
 class TestExtraccionEnSegundoPlano:
     def test_el_cuadro_se_actualiza_tras_la_extraccion(self):
-        conv, _ = _conversacion({"fiebre_c": 38.5, "evasivo": False})
+        """El texto del paciente DEBE contener la cifra: la validación contra el
+        texto crudo descarta números que el modelo introduce por su cuenta."""
+        conv, _ = _conversacion({"herida": "eritema_leve", "evasivo": False})
         conv.abrir()
-        conv.responder("tuve fiebre anoche")
+        conv.responder("la veo un poco roja alrededor")
         assert conv.esperar_extraccion()
-        assert conv.estado.cuadro.fiebre_c == 38.5
+        from src.clinico.escalamiento import Herida
 
-    def test_la_fiebre_alta_escala_en_el_turno_siguiente(self):
-        """Tolerado a cambio de la latencia: escala un turno después, no nunca."""
+        assert conv.estado.cuadro.herida is Herida.ERITEMA_LEVE
+
+    def test_la_extraccion_no_puede_inventar_la_cifra(self):
+        """Si el modelo devuelve una fiebre que el paciente no dijo, se descarta
+        y queda registrada como sospecha sin medir. Es el bug real que produjo
+        un escalamiento con motivo 'fiebre ≥ 38' cuando el paciente dijo 34."""
         conv, _ = _conversacion({"fiebre_c": 38.5, "evasivo": False})
         conv.abrir()
         conv.responder("tuve fiebre anoche")
         conv.esperar_extraccion()
-        r = conv.responder("la herida está bien")
+        assert conv.estado.cuadro.fiebre_c is None
+        assert conv.estado.cuadro.fiebre_referida_sin_medir
+
+    def test_la_fiebre_alta_dicha_escala_de_inmediato(self):
+        """Con la cifra en el texto, ya ni siquiera espera al turno siguiente:
+        el parser en código la toma en el mismo turno."""
+        conv, _ = _conversacion({"fiebre_c": 38.5, "evasivo": False})
+        conv.abrir()
+        r = conv.responder("tuve 38.5 de fiebre anoche")
         assert r.escala
-        assert any("fiebre" in m for m in r.decision.motivos)
+        assert any("38.5" in m for m in r.decision.motivos)
 
     def test_la_evasion_marca_el_foco_para_repreguntar(self):
         """El invariante es que el tema evadido quede marcado, no CUÁNDO se repregunta.

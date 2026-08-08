@@ -297,7 +297,12 @@ class Conversacion:
         #       de "Listo, ¿y la herida?" y el escalamiento un turno después
         #       suena a que el agente no escuchó el dato más importante.
         #     - Fiebre referida sin cifra: dispara el pedido del número.
-        cifra_dicha = fiebre.extraer_cifra(texto_paciente)
+        # Si el agente acaba de pedir la temperatura, un número pelado es la
+        # respuesta: "34." no trae la palabra fiebre pero ES la temperatura.
+        en_contexto_fiebre = self.estado.foco_actual is Foco.FIEBRE
+        cifra_dicha = fiebre.extraer_cifra(
+            texto_paciente, contexto_fiebre=en_contexto_fiebre
+        )
         if cifra_dicha is not None:
             with self._lock:
                 self.estado.cuadro.fiebre_c = cifra_dicha

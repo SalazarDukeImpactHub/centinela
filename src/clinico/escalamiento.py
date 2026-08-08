@@ -45,6 +45,9 @@ class Movilidad(str, Enum):
 # Umbrales validados. Cambiar cualquiera exige volver a correr el banco de 160 casos.
 FIEBRE_ROJO = 38.0
 FIEBRE_AMARILLO = 37.5
+# Por debajo de esto la temperatura reportada es hipotermia o una medición mal
+# tomada. Ninguna de las dos se ignora: ambas ameritan verificar.
+TEMPERATURA_BAJA = 35.5
 DOLOR_ROJO = 8
 DOLOR_AMARILLO = 4
 
@@ -140,6 +143,10 @@ def evaluar(cuadro: CuadroClinico) -> Decision:
             motivos_rojo.append(f"fiebre {cuadro.fiebre_c} °C ≥ {FIEBRE_ROJO}")
         elif cuadro.fiebre_c >= FIEBRE_AMARILLO:
             motivos_amarillo.append(f"febrícula {cuadro.fiebre_c} °C")
+        elif cuadro.fiebre_c < TEMPERATURA_BAJA:
+            motivos_amarillo.append(
+                f"temperatura {cuadro.fiebre_c} °C inusualmente baja — verificar medición"
+            )
     elif cuadro.fiebre_referida_sin_medir:
         # Fiebre referida sin termómetro. No se asume alta —sería alarmismo— ni
         # se descarta —sería el falso negativo que la rúbrica castiga—. Queda en
