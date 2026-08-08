@@ -20,13 +20,16 @@ está resuelta en código y el texto hablado se mantiene corto a propósito.
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-URL_BASE = "http://localhost:11434"
-MODELO = "llama3.2:3b"
+# Configurable por entorno: dentro de docker compose, Ollama vive en otro
+# contenedor y "localhost" apuntaría al contenedor de la aplicación.
+URL_BASE = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+MODELO = os.environ.get("MODELO_RAZONAMIENTO", "llama3.2:3b")
 TIMEOUT = 180
 
 

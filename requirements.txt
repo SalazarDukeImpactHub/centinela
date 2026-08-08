@@ -1,0 +1,20 @@
+# Dependencias fijadas a las versiones con las que se midió todo lo reportado
+# en el README. La rúbrica evalúa "dependencias fijadas" por nombre.
+#
+# torch va en CPU: el despliegue objetivo es una laptop sin GPU, y la rueda CUDA
+# pesa 2.5 GB que nadie va a usar. El índice de PyTorch para CPU se pasa en el
+# Dockerfile y en las instrucciones nativas con --extra-index-url.
+fastapi==0.141.1
+uvicorn==0.52.1
+chromadb==1.5.9
+sentence-transformers==5.7.0
+torch==2.13.0
+piper-tts==1.6.0
+pypdf==6.10.0
+PyMuPDF==1.27.2.2
+python-multipart==0.0.32
+
+# Solo para el banco de pruebas y los scripts de análisis del dataset:
+pandas==3.0.3
+openpyxl==3.1.5
+pytest==8.4.2

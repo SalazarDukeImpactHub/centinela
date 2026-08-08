@@ -1,0 +1,53 @@
+# Centinela — levantamiento completo con un solo comando:
+#
+#     docker compose up
+#
+# Dos servicios:
+#   ollama    — sirve el modelo de razonamiento (llama3.2:3b, de la lista
+#               permitida por las bases). Al arrancar descarga el modelo si no
+#               lo tiene; el volumen lo conserva entre reinicios.
+#   centinela — la aplicación: consola clínica, pipeline de voz, RAG.
+#
+# La única credencial externa es GROQ_API_KEY (transcripción de voz Whisper).
+# Se lee del archivo .env — ver .env.example.
+
+services:
+  ollama:
+    image: ollama/ollama:0.12.5
+    volumes:
+      - modelos_ollama:/root/.ollama
+    # El entrypoint por defecto solo sirve; acá además se asegura el modelo.
+    # La descarga (~2 GB) ocurre una única vez y queda en el volumen.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        sleep 4
+        ollama pull llama3.2:3b
+        wait
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  centinela:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      OLLAMA_URL: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      # Los registros de llamada y los resúmenes quedan fuera del contenedor:
+      # son la evidencia de auditoría que se contrasta con el README.
+      - ./logs:/app/logs
+      - ./subidas:/app/subidas
+
+volumes:
+  modelos_ollama:
