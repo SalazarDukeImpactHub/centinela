@@ -291,11 +291,18 @@ class Conversacion:
                 ]
                 self.estado.cuadro.sintomas_alarma.extend(nuevas)
 
-        # 1b. Fiebre referida sin cifra, también en código y en este mismo turno.
-        #     Por la vía de la extracción llegaría un turno tarde, y preguntar
-        #     "¿de cuánto?" después de haber cambiado de tema suena a no haber
-        #     escuchado.
-        if fiebre.refiere_fiebre_sin_cifra(texto_paciente):
+        # 1b. Fiebre en código y en este mismo turno, en sus dos variantes.
+        #     Por la vía de la extracción ambas llegarían un turno tarde.
+        #     - Cifra dicha en voz alta: decide el semáforo YA. "Tuve 38" seguido
+        #       de "Listo, ¿y la herida?" y el escalamiento un turno después
+        #       suena a que el agente no escuchó el dato más importante.
+        #     - Fiebre referida sin cifra: dispara el pedido del número.
+        cifra_dicha = fiebre.extraer_cifra(texto_paciente)
+        if cifra_dicha is not None:
+            with self._lock:
+                self.estado.cuadro.fiebre_c = cifra_dicha
+                self.estado.cuadro.fiebre_referida_sin_medir = False
+        elif fiebre.refiere_fiebre_sin_cifra(texto_paciente):
             with self._lock:
                 self.estado.cuadro.fiebre_referida_sin_medir = True
 

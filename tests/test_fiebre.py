@@ -187,3 +187,44 @@ class TestTono:
 
         assert "fiebre" in CIERRE_VERDE
         assert "avise" in CIERRE_VERDE or "llame" in CIERRE_VERDE
+
+
+class TestCifraDicha:
+    """La cifra dicha en voz alta decide el semáforo en el MISMO turno.
+
+    Antes viajaba por la extracción en segundo plano: "tuve 38" recibía
+    "Listo, gracias, ¿y la herida?" y el escalamiento llegaba un turno después,
+    como si el agente no hubiera escuchado el dato más importante de la llamada.
+    """
+
+    @pytest.mark.parametrize(
+        "texto,esperado",
+        [
+            ("creo que como 38", 38.0),
+            ("me dio 38.5", 38.5),
+            ("treinta y ocho y medio", 38.5),
+            ("tenía treinta y siete", 37.0),
+            ("me marcó 37,8 el termómetro", 37.8),
+            ("llegué a cuarenta con la fiebre", 40.0),
+            ("no he tenido fiebre", None),
+            ("camino como 20 minutos al día", None),
+        ],
+    )
+    def test_parseo_de_temperatura(self, texto: str, esperado):
+        from src.clinico.fiebre import extraer_cifra
+
+        assert extraer_cifra(texto) == esperado
+
+    def test_la_cifra_alta_escala_en_el_mismo_turno(self):
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="cholecystitis"))
+        conv.abrir()
+        r = conv.responder("Sí señora, ayer me sentí afiebrada, creo que como 38.")
+        assert r.escala
+        assert any("38" in m for m in r.decision.motivos)
+
+    def test_la_cifra_normal_no_escala_ni_pide_numero(self):
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="cholecystitis"))
+        conv.abrir()
+        r = conv.responder("me la tomé y estaba en 36.7, normal")
+        assert not r.escala
+        assert PEDIDOS_DE_DATO[Foco.FIEBRE] not in r.texto

@@ -94,3 +94,48 @@ def tiene_cifra(texto: str) -> bool:
 def refiere_fiebre_sin_cifra(texto: str) -> bool:
     """Dijo tener fiebre pero no dio el número. Hay que pedírselo en este turno."""
     return menciona_fiebre(texto) and not tiene_cifra(texto)
+
+
+# Números en palabras, como llegan por teléfono: "treinta y ocho y medio".
+_PALABRA_A_NUMERO = {
+    "cinco": 35, "seis": 36, "siete": 37, "ocho": 38, "nueve": 39,
+}
+_RE_DIGITOS = re.compile(r"\b(3[5-9]|4[0-2])(?:[.,](\d))?\b")
+_RE_PALABRAS = re.compile(
+    r"treinta\s+y\s+(cinco|seis|siete|ocho|nueve)(\s+(y\s+medio|punto\s+(\d)|coma\s+(\d)))?"
+)
+
+
+def extraer_cifra(texto: str) -> float | None:
+    """Extrae la temperatura dicha, en dígitos o en palabras. None si no hay.
+
+    Existe porque la cifra dicha en voz alta no puede esperar a la extracción del
+    modelo: "tuve 38" seguido de "Listo, gracias, ¿y la herida?" y un escalamiento
+    un turno después suena a que el agente no escuchó el dato más importante de la
+    llamada. El umbral está en 38.0 — esta cifra decide el semáforo YA.
+    """
+    normalizado = _normalizar(texto)
+    if not menciona_fiebre(normalizado) and "temperatura" not in normalizado \
+            and "termometro" not in normalizado and not tiene_cifra(normalizado):
+        return None
+
+    m = _RE_DIGITOS.search(normalizado)
+    if m:
+        entero = int(m.group(1))
+        decimal = int(m.group(2)) / 10 if m.group(2) else 0.0
+        return float(entero) + decimal
+
+    m = _RE_PALABRAS.search(normalizado)
+    if m:
+        valor = float(30 + _PALABRA_A_NUMERO[m.group(1)] - 30)
+        if m.group(3):
+            if "medio" in m.group(3):
+                valor += 0.5
+            elif m.group(4):
+                valor += int(m.group(4)) / 10
+            elif m.group(5):
+                valor += int(m.group(5)) / 10
+        return valor
+    if "cuarenta" in normalizado and menciona_fiebre(normalizado):
+        return 40.0
+    return None
