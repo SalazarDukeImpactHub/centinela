@@ -133,16 +133,29 @@ def _es_afirmacion(texto: str) -> bool:
 # 39 (rojo), y el umbral de escalamiento está justo en 38. Seguir de largo sin el
 # número obliga a asumir, y asumir en cualquiera de las dos direcciones es un
 # error clínico.
+# Cortos a propósito. La versión larga explicaba por qué hacía falta el número
+# ("no es lo mismo treinta y siete que treinta y nueve") y en llamada real sonó
+# innecesaria: el paciente ya entendió que le piden la temperatura.
 PEDIDOS_DE_DATO: dict[Foco, str] = {
-    Foco.FIEBRE: (
-        "¿Se alcanzó a tomar la temperatura? Si tiene el número me sirve mucho, "
-        "porque no es lo mismo treinta y siete que treinta y nueve."
-    ),
-    Foco.DOLOR: (
-        "¿Y si tuviera que ponerle un número del cero al diez, cuál sería? "
-        "Aunque sea aproximado."
-    ),
+    Foco.FIEBRE: "¿Se alcanzó a tomar la temperatura? ¿Cuánto le marcó?",
+    Foco.DOLOR: "¿Qué número le pondría, del cero al diez? Aunque sea aproximado.",
 }
+
+# Cuando el paciente responde algo de lo que no se puede extraer ningún dato del
+# tema preguntado. Decirle "eso me sirve saberlo" y cambiar de tema es fingir
+# que se escuchó — y en llamada real se percibió exactamente así.
+NO_SE_ENTENDIO: dict[Foco, str] = {
+    Foco.FIEBRE: "Disculpe, no le entendí la temperatura.",
+    Foco.HERIDA: "Perdone, no le entendí bien lo de la herida.",
+    Foco.DOLOR: "Disculpe, no le capté el número del dolor.",
+    Foco.MOVILIDAD: "Perdone, no le entendí lo del movimiento.",
+}
+
+# Temperatura fuera del rango humano: casi siempre error de transcripción.
+CIFRA_IMPOSIBLE = (
+    "Perdón, entendí {valor} grados y eso no puede ser. ¿Me repite el número, "
+    "más despacio?"
+)
 
 # Apertura: se presenta con nombre y rol, dice qué va a hacer y ofrece ayuda.
 # Todo en USTED. El registro no se mezcla: los pacientes del dataset son adultos
@@ -210,6 +223,44 @@ def _sin_tildes(texto: str) -> str:
     return "".join(c for c in plano if _unicodedata.category(c) != "Mn")
 
 
+def _aporta_dato(texto: str, foco: Foco | None) -> bool:
+    """El paciente dijo algo utilizable sobre el tema que se le preguntó.
+
+    Solo mira las señales que el código puede verificar en el momento. Si
+    devuelve False, el agente NO finge haber entendido: vuelve a preguntar. Es
+    la diferencia entre una conversación y un formulario que avanza pase lo que
+    pase — en llamada real, "¡Ojo!" recibía "eso me sirve saberlo" y el tema se
+    daba por cubierto.
+    """
+    if foco is None:
+        return True
+    plano = _sin_tildes(texto)
+    if foco is Foco.FIEBRE:
+        return (
+            fiebre.tiene_cifra(texto)
+            or fiebre.menciona_fiebre(texto)
+            or fiebre.niega_fiebre(texto)
+            or fiebre.intensidad_referida(texto) is not None
+        )
+    if foco is Foco.HERIDA:
+        return bool(
+            _re.search(
+                r"roj|colorad|hinchad|inflamad|liquido|supur|amarill|verdos|pus|"
+                r"seca|bien|limpia|normal|cicatriz|sangr|no la|no he|mirad|mire",
+                plano,
+            )
+        )
+    if foco is Foco.DOLOR:
+        return bool(
+            _re.search(r"\b([0-9]|10)\b|dolor|duele|molest|nada|aguantab|fuerte", plano)
+        )
+    if foco is Foco.MOVILIDAD:
+        return bool(
+            _re.search(r"camin|mov|levant|para|bano|silla|cama|ayud|solo|sola", plano)
+        )
+    return True
+
+
 def _eco_intensidad(intensidad: str | None) -> str | None:
     """Confirma la intensidad dicha en palabras, sin inventar un número."""
     if intensidad == "alta":
@@ -242,6 +293,14 @@ def _eco(texto_paciente: str, cifra_dicha: float | None, foco: Foco | None) -> s
 # Acuse cuando el paciente cuenta algo que preocupa. Reconoce lo que dijo antes
 # de seguir preguntando: pasar de largo suena a formulario.
 ACUSE_PREOCUPACION = "Entiendo su preocupación, y hace bien en contármelo."
+
+# Acuse específico cuando el paciente reporta escalofríos y no fiebre. Nombrar
+# lo que efectivamente dijo, en vez de responder como si hubiera dicho "fiebre",
+# es lo que hace que la conversación se sienta escuchada: los escalofríos son un
+# síntoma propio, aunque la conducta clínica sea la misma —pedir la temperatura.
+ACUSE_ESCALOFRIOS = (
+    "Los escalofríos son importantes, sobre todo después de una cirugía."
+)
 
 # Cuando el corpus no cubre la pregunta del paciente. Declarar el límite y
 # derivar es exactamente la conducta que el criterio de 20 puntos evalúa.
@@ -278,6 +337,10 @@ class EstadoLlamada:
     # Focos donde ya se pidió la cifra concreta. Se pide UNA vez: insistir dos
     # veces por un número que el paciente no tiene es hostigarlo.
     datos_pedidos: set[Foco] = field(default_factory=set)
+    # Focos donde ya se reintentó por no haber entendido la respuesta. Se
+    # reintenta UNA vez: si a la segunda tampoco se entiende, mejor avanzar y
+    # dejar constancia de lo que quedó sin preguntar.
+    reintentados: set[Foco] = field(default_factory=set)
     # El cierre se anuncia antes de ejecutarse: colgar en seco tras la última
     # pregunta deja al paciente con la palabra en la boca.
     despedida_ofrecida: bool = False
@@ -476,6 +539,26 @@ class Conversacion:
                 with self._lock:
                     self.estado.cuadro.fiebre_referida_sin_medir = True
 
+        # Cifra imposible: 58 grados no existe. Casi siempre es error de
+        # transcripción — el paciente dijo 38. Frena la conversación y pide
+        # confirmación, en vez de registrarla o de ignorarla en silencio.
+        if en_contexto_fiebre and cifra_dicha is None and intensidad is None:
+            imposible = fiebre.cifra_imposible(texto_paciente)
+            if imposible is not None:
+                valor = int(imposible) if imposible == int(imposible) else imposible
+                with self._lock:
+                    decision_actual = evaluar(self.estado.cuadro)
+                texto = CIFRA_IMPOSIBLE.format(valor=valor)
+                self.estado.transcripcion.append(("agente", texto))
+                return RespuestaTurno(
+                    texto=texto,
+                    decision=decision_actual,
+                    escala=False,
+                    cierra=False,
+                    foco=Foco.FIEBRE,
+                    alarmas_detectadas=detectadas,
+                )
+
         # 2. La extracción arranca en segundo plano y no bloquea nada.
         self._extraer_en_segundo_plano(texto_paciente, foco_previo)
 
@@ -513,6 +596,33 @@ class Conversacion:
                 alarmas_detectadas=detectadas,
             )
 
+        # 3c. Si la respuesta no aporta ningún dato del tema preguntado, se
+        #     vuelve a preguntar en vez de avanzar. Una sola vez: insistir dos
+        #     veces sobre lo mismo hostiga, y si no se entiende a la segunda,
+        #     mejor seguir y dejar constancia de lo que quedó sin preguntar.
+        with self._lock:
+            foco_respondido_previo = self.estado.foco_actual
+        if (
+            foco_respondido_previo is not None
+            and not decision.escala
+            and not prefijo
+            and not _aporta_dato(texto_paciente, foco_respondido_previo)
+            and foco_respondido_previo not in self.estado.reintentados
+        ):
+            with self._lock:
+                self.estado.reintentados.add(foco_respondido_previo)
+            variante = _elegir(PREGUNTAS[foco_respondido_previo])
+            texto = f"{NO_SE_ENTENDIO[foco_respondido_previo]} {variante}"
+            self.estado.transcripcion.append(("agente", texto))
+            return RespuestaTurno(
+                texto=texto,
+                decision=decision,
+                escala=False,
+                cierra=False,
+                foco=foco_respondido_previo,
+                alarmas_detectadas=detectadas,
+            )
+
         # 4. Siguiente pregunta desde plantilla: cero costo de modelo.
         #    Antes de avanzar de tema, se pide la cifra que quedó pendiente. Sin
         #    el número de la fiebre no se puede decidir, y asumirlo es un error
@@ -522,7 +632,15 @@ class Conversacion:
             if pendiente is not None:
                 self.estado.datos_pedidos.add(pendiente)
                 self.estado.foco_actual = pendiente
-                texto = f"{prefijo}{ACUSE_PREOCUPACION} {PEDIDOS_DE_DATO[pendiente]}"
+                # Se nombra lo que el paciente dijo: escalofríos no es fiebre,
+                # aunque lleven a la misma pregunta.
+                acuse_previo = (
+                    ACUSE_ESCALOFRIOS
+                    if pendiente is Foco.FIEBRE
+                    and "escalofri" in _sin_tildes(texto_paciente)
+                    else ACUSE_PREOCUPACION
+                )
+                texto = f"{prefijo}{acuse_previo} {PEDIDOS_DE_DATO[pendiente]}"
                 self.estado.transcripcion.append(("agente", texto))
                 return RespuestaTurno(
                     texto=texto,
@@ -538,6 +656,12 @@ class Conversacion:
             if not self.estado.despedida_ofrecida:
                 # Último espacio antes de cerrar: la llamada no se corta en seco.
                 self.estado.despedida_ofrecida = True
+                # Sin foco: la pregunta es abierta. Dejar el foco anterior hacía
+                # que un "no, nada más" se evaluara contra el último tema y
+                # disparara un reintento — el agente decía "no le entendí lo del
+                # movimiento" a alguien que solo se estaba despidiendo.
+                with self._lock:
+                    self.estado.foco_actual = None
                 texto = (
                     f"{prefijo}Ya casi terminamos. Antes de despedirme: "
                     "¿hay algo más que quiera contarme o preguntarme?"

@@ -61,17 +61,67 @@ class TestAperturaYOrden:
         assert ORDEN_FOCOS[0] is Foco.FIEBRE
         assert ORDEN_FOCOS[1] is Foco.HERIDA
 
-    def test_no_repite_un_foco_ya_preguntado(self):
+    def test_no_repite_un_foco_ya_cubierto(self):
+        """Con respuestas que SÍ aportan dato, cada turno avanza de tema.
+
+        Se usan respuestas concretas y no un "bueno" genérico: una respuesta sin
+        dato ahora dispara un reintento del mismo tema, que es la conducta
+        correcta y se verifica aparte.
+        """
+        respuestas = [
+            "no he tenido fiebre",
+            "la herida se ve bien",
+            "el dolor es como un 2",
+            "camino sin problema",
+        ]
         conv, _ = _conversacion()
         conv.abrir()
         vistos = {conv.estado.foco_actual}
-        for _ in range(3):
-            r = conv.responder("bueno")
+        for respuesta in respuestas:
+            r = conv.responder(respuesta)
             conv.esperar_extraccion()
-            if r.cierra:
+            if r.cierra or r.foco is None:
                 break
-            assert r.foco not in vistos
+            assert r.foco not in vistos, f"repitió {r.foco} tras '{respuesta}'"
             vistos.add(r.foco)
+
+
+class TestRespuestaSinDato:
+    """El agente no finge haber entendido.
+
+    Caso real: el paciente respondió "¡Ojo!" —ruido de transcripción— y el
+    agente contestó "Bueno, eso me sirve saberlo" y dio el tema por cubierto.
+    """
+
+    def test_vuelve_a_preguntar_lo_que_no_entendio(self):
+        from src.conversacion.turno import NO_SE_ENTENDIO
+
+        conv, _ = _conversacion()
+        conv.abrir()
+        foco_inicial = conv.estado.foco_actual
+        r = conv.responder("¡Ojo!")
+        assert r.foco is foco_inicial, "cambió de tema sin haber entendido"
+        assert NO_SE_ENTENDIO[foco_inicial] in r.texto
+
+    def test_reintenta_una_sola_vez(self):
+        """Insistir dos veces sobre lo mismo hostiga: mejor avanzar y dejar
+        constancia de lo que quedó sin preguntar."""
+        conv, _ = _conversacion()
+        conv.abrir()
+        foco_inicial = conv.estado.foco_actual
+        conv.responder("¡Ojo!")
+        conv.esperar_extraccion()
+        r = conv.responder("¡Ojo!")
+        assert r.foco is not foco_inicial
+
+    def test_una_respuesta_con_dato_no_dispara_reintento(self):
+        from src.conversacion.turno import NO_SE_ENTENDIO
+
+        conv, _ = _conversacion()
+        conv.abrir()
+        foco_inicial = conv.estado.foco_actual
+        r = conv.responder("no he tenido fiebre, nada")
+        assert NO_SE_ENTENDIO[foco_inicial] not in r.texto
 
 
 class TestAlarmasInmediatas:
@@ -213,15 +263,25 @@ class TestExtraccionEnSegundoPlano:
 
 class TestCierre:
     def test_el_cierre_verde_advierte_signos_de_alarma(self):
+        """Respuestas con dato en cada tema, hasta llegar al cierre."""
+        respuestas = [
+            "no he tenido fiebre",
+            "la herida se ve bien",
+            "el dolor es un 1",
+            "camino sin problema",
+            "no, nada más, gracias",
+        ]
         conv, _ = _conversacion({"evasivo": False})
         conv.abrir()
-        for _ in range(len(ORDEN_FOCOS) + 1):
-            r = conv.responder("todo normal")
+        r = None
+        for respuesta in respuestas:
+            r = conv.responder(respuesta)
             conv.esperar_extraccion()
             if r.cierra:
                 break
-        assert r.cierra
-        assert "fiebre" in r.texto or "llame" in r.texto
+        assert r is not None and r.cierra
+        assert "fiebre" in r.texto
+        assert "especialista" in r.texto or "equipo de salud" in r.texto
 
     def test_el_escalamiento_cierra_la_llamada(self):
         conv, _ = _conversacion()

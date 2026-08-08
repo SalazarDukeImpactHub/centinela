@@ -109,6 +109,38 @@ INTENSIDAD_BAJA = {
 }
 
 
+# Rango fisiológicamente posible en un ser humano vivo. Fuera de esto, la cifra
+# es un error de transcripción o de lectura del termómetro, no un dato clínico.
+#
+# Caso real: el paciente dijo "38" y Whisper transcribió "58". El agente
+# respondió "eso me sirve saberlo" y siguió. Una temperatura imposible tiene que
+# frenar la conversación y pedir confirmación — dejarla pasar es peor que no
+# haber preguntado, porque queda en el registro clínico.
+TEMPERATURA_MINIMA_POSIBLE = 30.0
+TEMPERATURA_MAXIMA_POSIBLE = 43.0
+
+# Números que el paciente dice en respuesta a la pregunta por la temperatura
+# pero que no pueden serlo. Se usan para distinguir "no dijo cifra" de
+# "dijo una cifra imposible" — son situaciones distintas y se responden distinto.
+_RE_CUALQUIER_NUMERO = re.compile(r"\b(\d{1,3})(?:[.,](\d))?\b")
+
+
+def cifra_imposible(texto: str) -> float | None:
+    """Devuelve el número dicho si es una temperatura imposible, o None.
+
+    Un 58 o un 12 en respuesta a "¿cuánto marcó el termómetro?" es casi siempre
+    un error de transcripción de voz. El agente debe pedir confirmación en vez
+    de registrarlo o de ignorarlo en silencio.
+    """
+    for m in _RE_CUALQUIER_NUMERO.finditer(_normalizar(texto)):
+        entero = int(m.group(1))
+        decimal = int(m.group(2)) / 10 if m.group(2) else 0.0
+        valor = entero + decimal
+        if not (TEMPERATURA_MINIMA_POSIBLE <= valor <= TEMPERATURA_MAXIMA_POSIBLE):
+            return valor
+    return None
+
+
 def _palabras(texto: str) -> set[str]:
     return set(re.findall(r"[a-z]+", _normalizar(texto)))
 
