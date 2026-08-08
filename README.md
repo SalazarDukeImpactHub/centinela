@@ -2,277 +2,282 @@
 
 # 🛡️ Centinela
 
-### Seguimiento posoperatorio por voz — *vigila la recuperación, avisa cuando algo cambia*
+### Agente de voz para seguimiento posoperatorio
 
-**Tech Sphere Challenge 2026**
+*Vigila la recuperación — avisa cuando algo cambia.*
 
-[![Tests](https://img.shields.io/badge/tests-221%20passing-brightgreen)]()
-[![Modelo](https://img.shields.io/badge/razonamiento-llama3.2%3A3b%20·%20local-blue)]()
-[![Latencia](https://img.shields.io/badge/latencia%20P50-4.2s-blue)]()
-[![Recall rojo](https://img.shields.io/badge/recall%20casos%20rojo-12%2F12-critical)]()
-[![Licencia](https://img.shields.io/badge/licencia-MIT-lightgrey)]()
+<br />
 
-Un agente de voz que llama a pacientes colombianos en posoperatorio, entiende
-*"me duele harto la herida y anoche tuve escalofríos"*, responde con la guía
-clínica en la mano —cita, documento y página— y decide **en código, no en el
-modelo,** cuándo alertar al equipo de salud.
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![Ollama](https://img.shields.io/badge/llama3.2:3b-100%25%20local-000000?style=for-the-badge&logo=ollama&logoColor=white)
+![ChromaDB](https://img.shields.io/badge/ChromaDB-6.512%20fragmentos-FF6B6B?style=for-the-badge)
+![Whisper](https://img.shields.io/badge/Whisper%20V3-es--CO-F55036?style=for-the-badge&logo=openai&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-compose%20up-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+
+![Recall](https://img.shields.io/badge/🔴%20recall%20casos%20rojo-12%2F12-critical?style=for-the-badge)
+![Latencia](https://img.shields.io/badge/⚡%20latencia%20P50-4.2s-blue?style=for-the-badge)
+![Tests](https://img.shields.io/badge/✅%20tests-221-brightgreen?style=for-the-badge)
+
+**Tech Sphere Challenge 2026** · Source Meridian × AI Thinkers Medellín
 
 </div>
 
 ---
 
-## Por qué este agente es distinto
+## ✨ Qué es
 
-La mayoría de los agentes clínicos le piden al modelo de lenguaje que sea
-inteligente en el momento justo. **Centinela asume que no lo será.** Cada señal
-de la que depende una vida vive en código determinista, auditable y probado
-contra los 160 casos del reto — y el modelo, un 3B local que cuesta cero, queda
-para lo que sí hace bien: entender cómo habla la gente.
+Un agente que **llama por voz** a pacientes colombianos recién operados, entiende
+*"me duele harto la herida y anoche tuve escalofríos"*, responde con la guía
+clínica en la mano —cita con archivo y página— y decide cuándo alertar al equipo
+de salud.
 
-El resultado se midió, no se prometió:
+La tesis del proyecto cabe en una frase: **el comportamiento clínico no puede
+depender de que el modelo de lenguaje sea inteligente.** Todo lo que decide
+sobre la salud del paciente es código determinista, auditable y probado contra
+los 160 casos del reto. El modelo —un 3B local que cuesta cero— queda para lo
+que sí hace bien: entender cómo habla la gente.
 
-| | |
-|---|---|
-| 🔴 **Recall en casos rojo** | **12/12 — cero falsos negativos** sobre el dataset oficial |
-| ⚡ **Latencia percibida P50** | **4,2 s** en llamadas reales (el modelo tarda 17 s — está fuera del camino crítico) |
-| 📄 **Trazabilidad** | cada afirmación clínica cita archivo y página, verificables |
-| 🎙️ **Sin botones** | escucha automática: el paciente habla, pausa, y el agente responde |
-| 💰 **Costo por llamada** | ~US$ 0,0006 — el razonamiento corre local |
+> Conversación de voz sin botones · semáforo clínico en código · RAG citable ·
+> conocimiento vivo en caliente · todo el razonamiento corre en la laptop.
 
 ---
 
-## Levantamiento (compuerta G2)
+## 🎯 Cómo funciona una llamada
 
-Requisitos: Docker con Compose. Nada más.
+```mermaid
+flowchart TD
+    A([🎙️ El paciente habla<br/>y hace una pausa]) --> B[Whisper Large V3<br/>transcribe · ~1,5 s]
+    B --> C{{"⚙️ CÓDIGO DETERMINISTA<br/>síntomas de alarma · temperatura dicha<br/>semáforo verde/amarillo/rojo · ~30 ms"}}
+    C -->|🔴 alarma| E[🚨 Alerta al equipo<br/>y la valoración CONTINÚA]
+    C -->|siguiente pregunta| D[Piper TTS<br/>primer audio ~0,4 s]
+    E --> D
+    D --> F([🔊 El agente responde<br/>latencia percibida P50: 4,2 s])
+    C -.->|segundo plano| M[llama3.2:3b local<br/>extrae detalle · ~17 s<br/>validado contra el texto crudo]
+    M -.-> C
+    C <--> R[(📚 ChromaDB<br/>6.512 fragmentos con cita<br/>a archivo y página)]
+
+    style C fill:#0B1220,stroke:#E02424,stroke-width:3px,color:#E8EDF6
+    style E fill:#0B1220,stroke:#F87171,color:#E8EDF6
+    style M fill:#0B1220,stroke:#64748B,stroke-dasharray: 5 5,color:#94A3B8
+    style R fill:#0B1220,stroke:#19C6E6,color:#E8EDF6
+```
+
+**La caja roja es el corazón**: la decisión clínica vive en código con umbrales
+validados, no en un prompt. El modelo (caja punteada) trabaja **fuera del camino
+crítico** —mientras el paciente escucha la respuesta— y no puede introducir un
+dato que el paciente no dijo: su salida se valida contra el texto crudo.
+
+---
+
+## 🧩 Lo que sabe hacer
+
+| | |
+|---|---|
+| 🎙️ **Escucha automática** | El paciente habla, hace una pausa, y el turno viaja solo. Sin botones — como una llamada de verdad |
+| 🚦 **Semáforo en código** | Fiebre ≥38, secreción purulenta, dolor ≥8 o síntoma de alarma escalan **solos** — recall 12/12 en los casos rojo del dataset |
+| 🗣️ **Entiende cómo habla la gente** | *"treinta y ocho y medio"*, *"30 y 5"*, *"me duele harto"*, *"fiebre no he tenido"* — dígitos, palabras, negaciones y regionalismos |
+| 🤔 **No finge haber entendido** | Si la respuesta no aporta el dato, lo dice y repregunta. Si la cifra es imposible (58 °C), pide confirmación. Dos intentos y sigue con gracia |
+| 📄 **Responde con la guía en la mano** | Preguntas del paciente → cita textual del corpus con archivo y página, o un honesto *"no lo sé, se lo anoto al equipo"* |
+| 🧠 **Conocimiento vivo (G5)** | Subir un PDF → el agente lo cita en la siguiente consulta. Borrarlo → lo olvida. En caliente, desde la consola |
+| 🚨 **Escala sin colgar** | Ante una bandera roja avisa, **termina la valoración** para que el equipo reciba el cuadro completo, y recapitula al despedirse |
+| 👵 **Acoge al cuidador** | *"Soy la hija, yo lo cuido"* → su relato vale y las alarmas barren su texto igual |
+| 📋 **Resumen estructurado al colgar** | Semáforo, motivos, cuadro clínico, qué quedó sin preguntar, costo — visible en pantalla y persistido en JSON |
+
+---
+
+## 🖥️ Las dos superficies
+
+**Consola de llamada** — transcripción en vivo, semáforo gigante que se lee de
+lejos, hallazgos detectados, panel *"de dónde saca la respuesta"* con la cita o
+la capa de la compuerta que bloqueó, y métricas de latencia/tokens/RAG al pie.
+
+**Consola de conocimiento** — subir, listar y eliminar documentos con estado de
+procesamiento visible. Índice de 105 documentos listo al arrancar.
+
+Tema claro por defecto (es una consola clínica: salas iluminadas, pantallas
+compartidas), oscuro a un clic. Los seis pares de color pasan WCAG AA — medido.
+
+---
+
+## 🚀 Levantamiento (compuerta G2)
+
+Requisitos: **Docker con Compose. Nada más.**
 
 ```bash
-git clone <URL_DEL_REPOSITORIO>
-cd postop-voice-agent
-cp env.example .env        # completar GROQ_API_KEY (ver abajo; la entrega
-                           # del reto incluye una key funcional en el .env)
+git clone https://github.com/SalazarDukeImpactHub/centinela.git
+cd centinela
+cp env.example .env        # completar GROQ_API_KEY (la entrega incluye una funcional)
 docker compose up
 ```
 
-Cuando la consola imprima `Application startup complete`, abrir
-**http://localhost:8080**. El punto verde de la cabecera confirma que índice,
-voz, modelo y transcripción están en pie — es el mismo chequeo de
-`GET /api/salud`, que puede consultarse directo.
-
-**Tiempos medidos** (laptop Intel i3-1005G1, 2 núcleos, 20 GB RAM, sin GPU):
+Cuando aparezca `Application startup complete` → **http://localhost:8080**.
+El punto verde de la cabecera es el `GET /api/salud`: verde significa que
+índice, voz, modelo y transcripción están **de verdad** en pie.
 
 | Etapa | Primera vez | Siguientes |
 |---|---|---|
-| `docker compose build` | ~12 min (descarga torch CPU, voz Piper, embeddings) | segundos (caché) |
-| Descarga de `llama3.2:3b` | ~4 min a 100 Mbps (queda en volumen) | 0 |
-| Arranque del servicio | ~40 s (carga y calienta modelos) | ~40 s |
+| `docker compose build` | ~12 min (torch CPU, voz, embeddings) | segundos (caché) |
+| Descarga `llama3.2:3b` | ~4 min a 100 Mbps (persiste en volumen) | 0 |
+| Arranque del servicio | ~40 s (carga y **calienta** los modelos) | ~40 s |
 
-La imagen sale del build con **todo adentro** —voz, embeddings, índice
-vectorial— para que ninguna descarga corra contra el reloj del levantamiento.
+La imagen sale del build con todo adentro —voz de Piper, embeddings, índice
+vectorial pre-construido— para que **ninguna descarga corra contra el reloj**
+del jurado.
 
 <details>
-<summary>Alternativa sin Docker (desarrollo)</summary>
+<summary>🔧 Alternativa sin Docker (desarrollo)</summary>
 
 ```bash
 pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 python -m piper.download_voices es_MX-claude-high --data-dir models/piper
-# Ollama nativo: https://ollama.com/download  y luego:
-ollama pull llama3.2:3b
-cp env.example .env        # completar GROQ_API_KEY
+ollama pull llama3.2:3b        # https://ollama.com/download
+cp env.example .env            # completar GROQ_API_KEY
 python -m uvicorn src.api.app:app --port 8080
 ```
 </details>
 
-### Credenciales
-
-| Variable | Para qué | Dónde se obtiene |
-|---|---|---|
-| `GROQ_API_KEY` | Transcripción de voz (Whisper Large V3) | gratis en [console.groq.com](https://console.groq.com/) |
-
-Es la **única** credencial. Si falta o expira, la consola lo dice con nombre y
-apellido y bloquea el inicio de llamada — no hay fallos silenciosos.
+**Única credencial:** `GROQ_API_KEY` (Whisper) — gratis en
+[console.groq.com](https://console.groq.com/). Si falta, la consola lo dice con
+nombre y apellido y bloquea la llamada. **No hay fallos silenciosos.**
 
 ---
 
-## Modelo de razonamiento (compuerta G3)
+## 🧠 El modelo (compuerta G3) — y por qué es el único posible
 
-**`llama3.2:3b`, local vía Ollama** — de la lista permitida por las bases.
+**`llama3.2:3b` local vía Ollama**, de la lista permitida. Verificado contra las
+API reales el 7 de agosto de 2026 (`scripts/check_groq.py` · `check_gemini.py`):
 
-Por qué este y no otro, verificado contra las API reales el 7 de agosto de 2026:
-
-| Modelo permitido | Estado al verificar |
+| Modelo permitido | Estado real |
 |---|---|
-| Google Gemini 1.5 Flash | **retirado por Google** — la cuenta solo sirve 2.0+ |
-| Llama 3.1 70B vía Groq | **retirado por Groq** — sirve 3.3-70B, que no está en la lista |
-| **Llama 3.2 (1B / 3B) local** | disponible — **elegido: 3B** |
-| Phi-3.5 Mini local | disponible |
+| Google Gemini 1.5 Flash | ❌ **retirado por Google** — la cuenta sirve solo 2.0+ |
+| Llama 3.1 70B vía Groq | ❌ **retirado por Groq** — sirve 3.3-70B, fuera de la lista |
+| **Llama 3.2 3B local** | ✅ **elegido** |
+| Llama 3.2 1B local | ⚠️ descartado por calidad: ante *"escalofríos"* respondió *"escarmiento"* |
 
-De los cuatro modelos de la lista, los dos de nube ya no existen como servicio.
-El 1B se descartó **por calidad medida**: ante "escalofríos" respondió
-"escarmiento" — inventó palabras en contexto clínico. El 3B respondió coherente
-y escaló correctamente.
+Los dos modelos de nube de la lista **ya no existen como servicio**. La
+arquitectura local no fue una preferencia: fue el único camino sin riesgo de
+descalificación — y terminó siendo la mejor decisión del proyecto.
 
-Verificación reproducible: `python scripts/check_groq.py` y
-`python scripts/check_gemini.py`.
+### Cada falla medida del modelo movió una responsabilidad al código
+
+| Señal | Vive en | La falla que lo decidió |
+|---|---|---|
+| Síntomas de alarma | código (regex sobre habla cruda) | el 3B inventó `dolor_toracico` al ver la lista en el prompt |
+| Temperatura dicha | código (parser: dígitos, palabras, "30 y 5") | *"creo que como 38"* escalaba un turno tarde |
+| Números alucinados | validación contra texto crudo | el 3B extrajo `fiebre_c=38` de un texto **sin cifra** |
+| Cifras imposibles | código (rango fisiológico 30–43 °C) | Whisper transcribió *"38"* como *"58"* y pasó de largo |
+| Decisión de escalar | código (umbrales del banco de 160 casos) | no se negocia con un prompt |
 
 ---
 
-## Arquitectura: el modelo no decide nada clínico
+## 📚 RAG con trazabilidad
 
-Principio rector: **el comportamiento clínico no puede depender de que el modelo
-sea inteligente.** Medido en esta máquina, el 3B tarda ~17 s por extracción y
-alucina bajo presión (extrajo `fiebre_c=38` de un texto sin cifra; inventó
-`dolor_toracico` cuando se le nombraba la lista de síntomas). Cada una de esas
-fallas medidas movió una responsabilidad del modelo al código:
+- **105 documentos** ingeribles de los 107 PDF del kit — 1 escaneado sin capa de
+  texto (excluido y reportado), 1 duplicado real detectado por huella de
+  contenido que el hash binario no veía.
+- **6.512 fragmentos citables** a archivo y página exacta.
+- **Compuerta de grounding en capas** — porque se midió que el umbral no
+  alcanza: la similitud coseno de lo respondible (0.853–0.927) **se superpone**
+  con la de lo clínicamente ausente (0.871–0.891). Capas: temas prohibidos
+  (dosis/medicación: nunca) → filtro por procedimiento del paciente → lista
+  explícita fuera de corpus → verificación léxica por raíz → umbral.
+- 🔍 **Hallazgo mayor** ([docs/corpus-hallazgos.md](docs/corpus-hallazgos.md)):
+  la carpeta `breast_cancer` del kit contiene literatura de **cáncer de cuello
+  uterino** — 18/19 documentos; ninguno menciona mastectomía, con 8 pacientes
+  mastectomizadas en el dataset. Centinela **declara el límite** en vez de citar
+  literatura del órgano equivocado con formato impecable.
 
-| Señal | Vive en | Por qué |
-|---|---|---|
-| Síntomas de alarma (disnea, síncope, dehiscencia…) | código (regex sobre habla cruda) | no puede llegar tarde ni alucinarse |
-| Decisión de escalamiento (semáforo) | código (umbrales validados) | recall 12/12 en rojo, auditable |
-| Temperatura dicha en voz alta | código (parser, dígitos y palabras) | decide el semáforo en el mismo turno |
-| Cifras imposibles (58 °C) | código (rango fisiológico) | error de transcripción, se confirma |
-| Secuencia de preguntas | código (campos faltantes) | el agente conduce, no improvisa |
-| Extracción de detalle (herida, movilidad) | modelo, **en segundo plano** | validada contra el texto crudo: no puede introducir números que el paciente no dijo |
+---
 
-El modelo corre **fuera del camino crítico**: la extracción ocurre mientras el
-paciente escucha la respuesta. Latencia percibida medida: **P50 4,2 s** en
-llamadas reales de prueba (ver métricas), contra los ~19 s que costaría esperar
-la extracción en línea.
+## 📊 Métricas obligatorias — recalculables, no prometidas
 
-```mermaid
-flowchart LR
-    P([🎙️ paciente habla]) --> W[Whisper Large V3<br/>transcripción · ~1,5 s]
-    W --> C{{"⚙️ CÓDIGO<br/>alarmas · cifras · semáforo<br/>~30–130 ms"}}
-    C -->|texto de respuesta| T[Piper TTS<br/>primer audio ~0,4 s]
-    T --> A([🔊 agente responde])
-    C -.->|en segundo plano| M[llama3.2:3b local<br/>extracción de detalle ~17 s]
-    M -.->|validado contra el texto crudo| C
-    C <--> R[(ChromaDB · 6.512 fragmentos<br/>cita a archivo y página)]
+Todo número de esta sección se regenera desde los registros reales con:
 
-    style C fill:#e02424,color:#fff,stroke:#a51111,stroke-width:3px
-    style M fill:#eef2f7,color:#0b1220,stroke:#b9c6d4,stroke-dasharray: 5 5
-    style R fill:#e3efff,color:#0b1220,stroke:#0b6ee0
+```bash
+python scripts/metricas_readme.py
 ```
 
-**La caja roja es la tesis del proyecto**: la decisión clínica es código con
-umbrales validados, no un prompt. El modelo (caja punteada) trabaja fuera del
-camino crítico y **no puede introducir un dato que el paciente no dijo** — su
-salida se valida contra el texto crudo antes de tocar el cuadro clínico.
+**Latencia** (fin de habla del paciente → inicio de audio del agente), sobre 25
+turnos de voz reales en el hardware de referencia (Intel i3-1005G1, 2 núcleos,
+sin GPU):
 
-## RAG con trazabilidad (20 pts)
-
-- **105 documentos** ingeribles de los 107 PDF del kit (1 escaneado sin capa de
-  texto, excluido y reportado; 1 duplicado real detectado por huella de contenido
-  — el hash binario no lo veía).
-- **6.512 fragmentos** con cita exacta a archivo y página. El índice viaja
-  pre-construido: regenerarlo cuesta ~9 min de CPU que G2 no regala.
-- **Compuerta de grounding en capas**, no un umbral: se midió que la similitud
-  coseno **no separa** lo respondible (0.853–0.927) de lo clínicamente ausente
-  (0.871–0.891). Capas: temas prohibidos (dosis/medicación, nunca se responden) →
-  filtro por procedimiento del paciente → lista de procedimientos fuera de corpus →
-  verificación léxica por raíz → umbral.
-- **Conocimiento vivo (G5)**: subir un PDF lo indexa y el agente lo cita;
-  borrarlo lo olvida en la misma consulta. Ciclo completo cubierto por tests.
-- Hallazgo documentado en [`docs/corpus-hallazgos.md`](docs/corpus-hallazgos.md):
-  la carpeta `breast_cancer` del kit contiene literatura de **cuello uterino**
-  (18/19 documentos; 0 mencionan mastectomía). Ante pacientes mastectomizadas,
-  Centinela declara el límite en vez de citar literatura del órgano equivocado.
-
-## Seguridad
-
-- **Inyección de prompt por documentos**: el texto que entra por la consola se
-  neutraliza (patrones de instrucción, delimitadores) y el material recuperado
-  viaja delimitado como datos. 14 ataques de prueba bloqueados, 6 textos
-  clínicos legítimos intactos.
-- La decisión clínica no es inyectable: vive en código.
-- Revisiones por fase en [`docs/security/`](docs/security/).
-
----
-
-## Métricas obligatorias
-
-Fuente: registros JSONL por turno en `logs/` (uno por llamada, más un resumen
-estructurado al colgar). **Todo número de esta sección se recalcula con
-`python scripts/metricas_readme.py` sobre esos registros** — si no cuadra con
-los logs, ese script lo delata.
-
-### Latencia de respuesta (fin de habla → inicio de audio del agente)
-
-Sobre 25 turnos de voz reales de las sesiones de prueba (hardware de referencia:
-i3-1005G1, 2 núcleos):
+<div align="center">
 
 | P50 | P95 |
-|---|---|
+|:---:|:---:|
 | **4.196 ms** | **10.620 ms** |
 
-El peor turno registrado (58,7 s) ocurrió cuando la extracción en segundo plano
-acaparaba los 4 hilos lógicos; se corrigió limitando el modelo a 2 hilos
-(`num_thread=2`) y el turno equivalente posterior midió 6,8 s. Los registros
-conservan el caso: los números malos también son evidencia.
+</div>
 
-### Consumo por turno y por llamada
+El peor turno registrado (58,7 s) ocurrió cuando la extracción acaparaba los 4
+hilos lógicos; se corrigió con `num_thread=2` y el turno equivalente midió
+6,8 s. El registro conserva el caso: **los números malos también son evidencia.**
 
-| Métrica | Valor medido |
-|---|---|
-| Tokens por turno con extracción (promedio) | ~786 entrada / ~39 salida |
-| Invocaciones al modelo por turno | 1 (en segundo plano; 0 en el camino crítico) |
-| Consultas RAG por turno | 1 (sustento de protocolo o respuesta a pregunta) |
+**Consumo:** ~786 tokens de entrada / ~39 de salida por turno con extracción ·
+1 invocación al modelo por turno (en segundo plano, 0 en el camino crítico) ·
+1 consulta RAG por turno. La extracción corre en segundo plano, así que sus
+tokens se atribuyen al turno siguiente — el total por llamada cuadra exacto.
 
-Nota de atribución: la extracción corre en segundo plano, así que sus tokens se
-registran en el turno **siguiente**. El total por llamada cuadra exacto; el
-reparto por turno llega con un turno de rezago, y así está documentado en el
-código del registro.
+**Costo por llamada: ~US$ 0,0006** — razonamiento local (marginal 0,
+extrapolado a tarifa pública de API comparable: 0,05/0,08 USD por M tokens) +
+Whisper en Groq (0,111 USD/h de audio). El desglose viaja en cada
+`logs/*-resumen.json`.
 
-### Costo por llamada (extrapolado a API productiva)
-
-El razonamiento corre local (costo marginal 0). Extrapolación declarada:
-tarifa pública de Llama 3.1 8B serverless como sustituto comparable
-(USD 0,05/M entrada · 0,08/M salida) + Whisper en Groq (USD 0,111/h de audio).
-
-**Llamada típica de 5 turnos: ~USD 0,0006** — dominado por la transcripción.
-El cálculo exacto viaja en cada resumen de llamada (`logs/*-resumen.json`).
-
-### Banco de decisión clínica
-
-Motor de escalamiento contra los **160 casos etiquetados** del dataset oficial:
+**Banco de decisión clínica** contra los 160 casos etiquetados del dataset:
 
 | Métrica | Resultado |
 |---|---|
-| **Recall en ROJO (12 casos)** | **12/12 — cero falsos negativos** |
-| Amarillos degradados a verde | 0 |
-| Verdes sobre-escalados | dentro del margen aceptado (≤50) |
+| 🔴 Recall en ROJO (12 casos) | **12/12 — cero falsos negativos** |
+| 🟡 Amarillos degradados a verde | **0** |
+| 🟢 Sobre-escalamiento de verdes | dentro del margen aceptado |
 
-Calibrado a propósito hacia el recall: un falso positivo cuesta una llamada de
-verificación; un falso negativo en posoperatorio es riesgo clínico. La rúbrica
-declara esa asimetría y el motor la implementa.
+Calibrado a propósito: un falso positivo cuesta una llamada de verificación; un
+falso negativo en posoperatorio es riesgo clínico.
 
 ---
 
-## Los datos del reto
+## 🛡️ Seguridad
 
-El corpus clínico y el dataset **no se redistribuyen** en este repositorio: los
-PDF conservan los derechos de sus autores. Para reconstruir el índice desde el
-kit oficial (opcional — ya viaja construido):
+- ✅ **Inyección de prompt por documentos** neutralizada: la consola de G5 es un
+  canal de entrada al prompt, y el texto se sanea + el material recuperado viaja
+  delimitado como datos. 14 ataques bloqueados, 6 textos clínicos intactos
+- ✅ La decisión clínica **no es inyectable**: vive en código
+- ✅ El modelo **no puede inventar datos**: su salida se valida contra lo que el
+  paciente dijo
+- ✅ Credencial única, fuera del control de versiones, con fallo **ruidoso** si falta
+- ✅ Revisiones de seguridad por fase en [docs/security/](docs/security/)
+
+---
+
+## 📂 Estructura
+
+```
+src/clinico/       motor de escalamiento, alarmas, fiebre — TODO determinista
+src/conversacion/  máquina de turnos, preguntas del paciente, cuidadores
+src/rag/           extracción PDF, chunking citable, índice, grounding, saneamiento
+src/voz/           Whisper (Groq) + Piper con cadencia natural y cifras habladas
+src/api/           FastAPI: llamada (G4), conocimiento (G5), salud
+web/               consola clínica — tema claro, WCAG AA medido
+tests/             221 pruebas, incluida la conducta conversacional
+docs/              hallazgos del corpus, revisiones de seguridad por fase
+logs/              registros por turno y resúmenes de llamada (la evidencia)
+```
+
+Los datos del reto **no se redistribuyen** (los PDF conservan sus derechos).
+Para reconstruir el índice desde el kit oficial — opcional, ya viaja construido:
 
 ```bash
 git clone https://github.com/TechSphere2026/ParticipantArtifacts.git ../techsphere-2026
-python scripts/ingest.py
-python -m pytest tests/  # incluye el banco de 160 casos si el kit está en disco
+python scripts/ingest.py && python -m pytest tests/
 ```
 
-## Estructura
+---
 
-```
-src/clinico/    motor de escalamiento, alarmas, fiebre — TODO determinista
-src/conversacion/ máquina de turnos, detección de preguntas y terceros
-src/rag/        extracción PDF, chunking citable, índice, grounding, saneamiento
-src/voz/        Whisper (Groq) y Piper con cadencia natural
-src/api/        FastAPI: llamada (G4), conocimiento (G5), salud
-web/            consola clínica (tema claro, WCAG AA)
-tests/          221 pruebas, incluidas las de conducta conversacional
-docs/           hallazgos del corpus, revisiones de seguridad
-logs/           registros por turno y resúmenes de llamada (evidencia)
-```
+<div align="center">
 
-## Licencia
+**Salazar Duke Impact Hub** · Hecho con 🧠 e *inteligencia con alma*
 
-MIT — ver [LICENSE](LICENSE).
+*Los escalofríos son importantes, sobre todo después de una cirugía.*
+
+</div>
