@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 import io
 import tempfile
 import uuid
@@ -354,6 +355,40 @@ CONSULTA_POR_FOCO = {
 }
 CONSULTA_ESCALACION = "criterios de derivación urgente infección postoperatoria fiebre"
 
+# Alucinaciones conocidas de Whisper sobre audio vacío o ruido. Aparecen porque
+# el modelo fue entrenado con subtítulos: ante el silencio, "recuerda" créditos.
+_RUIDO_WHISPER = re.compile(
+    r"subt[ií]tulos|amara\.org|gracias por ver|suscr[ií]bete|www\.",
+    re.IGNORECASE,
+)
+
+
+# Frases de cortesía que Whisper alucina sobre el silencio — verificado: nuestro
+# archivo de ruido casi inaudible transcribe como "Gracias.". Solo cuentan como
+# ruido cuando son el ÚNICO contenido del turno: "gracias, ya me tomé la
+# temperatura" es habla real y pasa.
+_CORTESIA_ALUCINADA = {
+    "gracias", "muchas gracias", "gracias por ver", "adios", "hasta luego",
+    "chau", "amen", "musica", "aplausos", "silencio",
+}
+
+
+def _transcripcion_trivial(texto: str) -> bool:
+    """La transcripción no contiene habla real del paciente.
+
+    Los dígitos CUENTAN como contenido: "37" es la respuesta legítima a la
+    pregunta por la temperatura. Solo puntuación y espacios no lo son.
+    """
+    contenido = re.sub(r"[\W_]+", "", texto, flags=re.UNICODE)
+    if len(contenido) < 2:
+        return True
+    if _RUIDO_WHISPER.search(texto):
+        return True
+    normalizado = re.sub(r"[\W_]+", " ", texto.lower()).strip()
+    normalizado = normalizado.replace("á", "a").replace("é", "e").replace("í", "i") \
+        .replace("ó", "o").replace("ú", "u")
+    return normalizado in _CORTESIA_ALUCINADA
+
 
 def _sustentar_paso(sesion: SesionLlamada, respuesta) -> None:
     """Puebla el panel de citas con el sustento del paso actual del triaje."""
@@ -425,8 +460,26 @@ async def _procesar_turno(sesion: SesionLlamada, audio: UploadFile) -> JSONRespo
     finally:
         ruta_audio.unlink(missing_ok=True)
 
-    if not transcripcion.texto:
-        raise HTTPException(422, "no se entendió el audio, intente de nuevo")
+    if _transcripcion_trivial(transcripcion.texto):
+        # Whisper alucina sobre grabaciones vacías: devuelve ".", "Gracias." o
+        # créditos de subtítulos. Pasó en prueba real: un "." consumió el turno
+        # de movilidad y la llamada cerró sin ese dato. La respuesta correcta es
+        # pedir que repita, POR VOZ y sin consumir el turno clínico.
+        texto_repetir = "Perdón, no le escuché bien. ¿Me lo puede repetir?"
+        audio_b64, _ = _sintetizar(texto_repetir)
+        sesion.conversacion.estado.transcripcion.append(("agente", texto_repetir))
+        metrica.latencia_ms = (time.perf_counter() - inicio) * 1000
+        sesion.registro.persistir(metrica)
+        return JSONResponse(
+            {
+                **_estado_publico(sesion),
+                "texto_paciente": "",
+                "texto_agente": texto_repetir,
+                "audio_wav_base64": audio_b64,
+                "latencia_ms": round(metrica.latencia_ms, 1),
+                "repeticion": True,
+            }
+        )
 
     # Decisión: código puro, sin esperar al modelo.
     t1 = time.perf_counter()

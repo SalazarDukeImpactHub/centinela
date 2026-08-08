@@ -141,8 +141,8 @@ async function abrirMicrofono() {
     analizador.fftSize = 256;
     analizador.smoothingTimeConstant = 0.72;
     fuente.connect(analizador);
-    $('notaAudio').textContent = 'Micrófono en vivo';
-    estado('Escuchando', 'Turno del paciente', 'var(--accent)');
+    $('notaAudio').textContent = 'Micrófono en vivo · escucha automática';
+    estado('Escuchando', 'Hable con confianza — no necesita presionar nada', 'var(--accent)');
   } catch {
     $('notaAudio').textContent = 'Sin acceso al micrófono';
     estado('Sin micrófono', 'Permiso denegado', 'var(--crit)');
@@ -169,7 +169,7 @@ const iniciarGrabacion = () => {
   grabadora.onstop = enviarTurno;
   grabadora.start();
   $('btnHablar').classList.add('rec');
-  $('btnHablar').textContent = 'Grabando… soltá para enviar';
+  $('btnHablar').textContent = 'La escucho… haga una pausa al terminar';
 };
 
 const detenerGrabacion = () => {
@@ -177,14 +177,74 @@ const detenerGrabacion = () => {
   grabadora.stop();
   grabadora = null;
   $('btnHablar').classList.remove('rec');
-  $('btnHablar').textContent = 'Mantené presionado para hablar';
+  $('btnHablar').textContent = 'Hable cuando quiera — la escucho sola';
 };
 
-$('btnHablar').addEventListener('mousedown', iniciarGrabacion);
-$('btnHablar').addEventListener('mouseup', detenerGrabacion);
-$('btnHablar').addEventListener('mouseleave', detenerGrabacion);
-$('btnHablar').addEventListener('touchstart', (e) => { e.preventDefault(); iniciarGrabacion(); });
-$('btnHablar').addEventListener('touchend', (e) => { e.preventDefault(); detenerGrabacion(); });
+/* Si el agente empieza a hablar mientras había una captura abierta, se descarta
+ * sin enviar: sería el eco del parlante, no el paciente. */
+const descartarGrabacion = () => {
+  if (!grabadora) return;
+  grabadora.onstop = null;
+  grabadora.stop();
+  grabadora = null;
+  trozos = [];
+  $('btnHablar').classList.remove('rec');
+};
+
+/* ── Escucha automática (detección de actividad de voz) ───────────────────────
+ * Probado en llamada real: exigir mantener un botón apretado hace que la gente
+ * hable sin apretarlo, y el turno viaja vacío — Whisper alucina un "." y la
+ * conversación avanza sin el dato. La llamada telefónica real no tiene botón:
+ * el paciente habla, hace una pausa, y el agente responde.
+ *
+ * Reglas: solo escucha cuando es el turno del paciente (ni procesando, ni con
+ * el agente hablando — el parlante haría eco). Arranca a grabar tras ~250 ms de
+ * voz sostenida y corta tras 1.5 s de silencio. El botón sigue funcionando como
+ * modo manual por si el ambiente es ruidoso. */
+const UMBRAL_VOZ = 0.028;
+const VOZ_PARA_ARRANCAR_MS = 250;
+const SILENCIO_PARA_CORTAR_MS = 1500;
+const TURNO_MAXIMO_MS = 30000;
+
+let vozMs = 0;
+let silencioMs = 0;
+let capturaAutomatica = false;
+let manualActivo = false;
+
+setInterval(() => {
+  if (!analizador || !llamadaId || procesando || audioActual || manualActivo) {
+    if (capturaAutomatica) { capturaAutomatica = false; descartarGrabacion(); }
+    vozMs = 0; silencioMs = 0;
+    return;
+  }
+  const buf = new Uint8Array(analizador.fftSize);
+  analizador.getByteTimeDomainData(buf);
+  let suma = 0;
+  for (const v of buf) { const x = (v - 128) / 128; suma += x * x; }
+  const rms = Math.sqrt(suma / buf.length);
+
+  if (rms > UMBRAL_VOZ) { vozMs += 100; silencioMs = 0; }
+  else { silencioMs += 100; if (!capturaAutomatica) vozMs = 0; }
+
+  if (!capturaAutomatica && vozMs >= VOZ_PARA_ARRANCAR_MS) {
+    capturaAutomatica = true;
+    iniciarGrabacion();
+  } else if (capturaAutomatica && grabadora &&
+             (silencioMs >= SILENCIO_PARA_CORTAR_MS || vozMs + silencioMs >= TURNO_MAXIMO_MS)) {
+    capturaAutomatica = false;
+    detenerGrabacion();
+  }
+}, 100);
+
+/* El botón queda como modo manual para ambientes ruidosos: mientras se mantiene
+ * presionado, la escucha automática se apaga para no pisarse entre sí. */
+const manualInicio = () => { manualActivo = true; iniciarGrabacion(); };
+const manualFin = () => { manualActivo = false; detenerGrabacion(); };
+$('btnHablar').addEventListener('mousedown', manualInicio);
+$('btnHablar').addEventListener('mouseup', manualFin);
+$('btnHablar').addEventListener('mouseleave', () => { if (manualActivo) manualFin(); });
+$('btnHablar').addEventListener('touchstart', (e) => { e.preventDefault(); manualInicio(); });
+$('btnHablar').addEventListener('touchend', (e) => { e.preventDefault(); manualFin(); });
 
 async function enviarTurno() {
   if (!trozos.length || !llamadaId || procesando) return;
@@ -239,7 +299,7 @@ function bloquearHablar(bloqueado) {
   b.disabled = bloqueado;
   b.style.opacity = bloqueado ? '.55' : '';
   if (bloqueado) b.textContent = 'Procesando su respuesta…';
-  else if (llamadaId) b.textContent = 'Mantené presionado para hablar';
+  else if (llamadaId) b.textContent = 'Hable cuando quiera — la escucho sola';
 }
 
 /* Un fallo del servicio se escribe en la transcripción, donde el operador está
@@ -305,7 +365,7 @@ function reproducir(b64) {
   audioActual = new Audio('data:audio/wav;base64,' + b64);
   audioActual.onended = () => {
     audioActual = null;
-    if (llamadaId) estado('Escuchando', 'Turno del paciente', 'var(--accent)');
+    if (llamadaId) estado('Escuchando', 'Puede hablar — la escucho sola', 'var(--accent)');
   };
   audioActual.play().catch(() => {});
 }
