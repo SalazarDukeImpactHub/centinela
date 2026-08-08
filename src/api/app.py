@@ -529,6 +529,15 @@ async def _procesar_turno(sesion: SesionLlamada, audio: UploadFile) -> JSONRespo
     metrica.llamadas_modelo = uso_actual["llamadas"] - uso_previo["llamadas"]
     metrica.tokens_entrada = uso_actual["tokens_entrada"] - uso_previo["tokens_entrada"]
     metrica.tokens_salida = uso_actual["tokens_salida"] - uso_previo["tokens_salida"]
+    # Trazabilidad completa del turno: qué se dijo, qué se decidió y por qué, qué
+    # se detectó y qué documento respalda la respuesta. El semáforo de CADA turno
+    # queda escrito aunque después cambie — la historia no se pisa.
+    metrica.motivos = list(respuesta.decision.motivos)
+    metrica.texto_paciente = transcripcion.texto
+    metrica.texto_agente = texto_agente
+    metrica.citas = list(sesion.citas)
+    metrica.grounding = dict(sesion.grounding) if sesion.grounding else None
+    metrica.hallazgos = _estado_publico(sesion)["hallazgos"]
     sesion.registro.persistir(metrica)
 
     if respuesta.cierra:
@@ -581,26 +590,43 @@ async def colgar(llamada_id: str) -> JSONResponse:
 
     estado = sesion.conversacion.estado
     decision = evaluar(estado.cuadro)
-    return JSONResponse(
-        {
-            **_estado_publico(sesion),
-            "resumen": {
-                "escenario": estado.escenario,
-                "semaforo": decision.semaforo.value,
-                "motivos": decision.motivos,
-                "escalado": decision.escala,
-                "cuadro": {
-                    "dolor_nrs": estado.cuadro.dolor_nrs,
-                    "fiebre_c": estado.cuadro.fiebre_c,
-                    "herida": estado.cuadro.herida.value,
-                    "movilidad": estado.cuadro.movilidad.value,
-                    "sintomas_alarma": estado.cuadro.sintomas_alarma,
-                },
-                "sin_preguntar": estado.cuadro.campos_faltantes,
-                "citas": sesion.citas,
-            },
-        }
+    resumen = {
+        "llamada_id": sesion.id,
+        "escenario": estado.escenario,
+        "semaforo_final": decision.semaforo.value,
+        "motivos": decision.motivos,
+        "escalado": decision.escala,
+        "cuadro": {
+            "dolor_nrs": estado.cuadro.dolor_nrs,
+            "fiebre_c": estado.cuadro.fiebre_c,
+            "herida": estado.cuadro.herida.value,
+            "movilidad": estado.cuadro.movilidad.value,
+            "sintomas_alarma": estado.cuadro.sintomas_alarma,
+        },
+        "sin_preguntar": estado.cuadro.campos_faltantes,
+        "transcripcion": [
+            {"quien": quien, "texto": texto} for quien, texto in estado.transcripcion
+        ],
+        # La historia turno a turno con semáforo, motivos, hallazgos y citas
+        # vive en llamada-{id}.jsonl; acá va el estado final consolidado.
+        "metricas": sesion.registro.totales(),
+        "costo": costo_estimado(
+            sesion.conversacion.uso_modelo["tokens_entrada"],
+            sesion.conversacion.uso_modelo["tokens_salida"],
+            sesion.segundos_audio,
+        ),
+        "registro_turnos": str(sesion.registro.ruta.name),
+    }
+    # El resumen se PERSISTE, no solo se devuelve: es el "resumen estructurado
+    # de cada llamada" que exige el reto, y la evidencia de auditoría.
+    import json as _json
+
+    destino = LOGS / f"llamada-{sesion.id}-resumen.json"
+    destino.write_text(
+        _json.dumps(resumen, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+    return JSONResponse({**_estado_publico(sesion), "resumen": resumen})
 
 
 # -- Conocimiento (G5) -----------------------------------------------------------

@@ -186,7 +186,8 @@ class TestTono:
         from src.conversacion.turno import CIERRE_VERDE
 
         assert "fiebre" in CIERRE_VERDE
-        assert "avise" in CIERRE_VERDE or "llame" in CIERRE_VERDE
+        # Pedido explícito: la derivación nombra al especialista a cargo.
+        assert "especialista" in CIERRE_VERDE or "equipo de salud" in CIERRE_VERDE
 
 
 class TestCifraDicha:

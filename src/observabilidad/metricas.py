@@ -48,6 +48,17 @@ class TurnoMetrica:
     modelo: str = ""
     escalado: bool = False
     semaforo: str = ""
+    # Trazabilidad clínica POR TURNO. Sin esto, el registro guardaba números
+    # pero no la historia: el semáforo de los primeros turnos se perdía en
+    # cuanto cambiaba, y las citas de cada respuesta no quedaban en ninguna
+    # parte. La rúbrica exige que cada respuesta pueda rastrearse hasta su
+    # documento — eso solo se audita si quedó escrito.
+    motivos: list[str] = field(default_factory=list)
+    hallazgos: list[dict] = field(default_factory=list)
+    citas: list[dict] = field(default_factory=list)
+    grounding: dict | None = None
+    texto_paciente: str = ""
+    texto_agente: str = ""
 
     def registrar_etapa(self, nombre: str, ms: float) -> None:
         self.etapas.append(Etapa(nombre, ms))

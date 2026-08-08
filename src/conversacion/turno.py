@@ -114,6 +114,18 @@ REPREGUNTAS: dict[Foco, tuple[str, ...]] = {
 def _elegir(opciones: tuple[str, ...]) -> str:
     return random.choice(opciones)
 
+
+_AFIRMACION = _re.compile(
+    r"^\s*(si|sí|claro|correcto|asi es|así es|he tenido|si he tenido|un poco|"
+    r"a veces|creo que si|creo que sí|me parece que si)[\s.,!]*$",
+    _re.IGNORECASE,
+)
+
+
+def _es_afirmacion(texto: str) -> bool:
+    """Respuesta corta que afirma sin dar detalle: "sí", "he tenido", "un poco"."""
+    return bool(_AFIRMACION.match(texto.strip()))
+
 # Repregunta por DATO FALTANTE: el paciente respondió, pero sin la cifra que la
 # decisión necesita. Es distinto de la evasión — acá sí quiere colaborar.
 #
@@ -155,14 +167,15 @@ ESCALAMIENTO = (
 CIERRE_VERDE = (
     "Me deja tranquilo, su recuperación va bien encaminada. Le pido una cosa: si "
     "le llega a dar fiebre, si la herida le cambia de aspecto o si el dolor "
-    "aumenta, no espere a la próxima llamada y avise de una vez. "
-    "Que siga mejorando, y gracias por su tiempo."
+    "aumenta, póngase en contacto de una vez con el especialista a cargo de su "
+    "cirugía o con su equipo de salud. Que siga mejorando, y gracias por su tiempo."
 )
 
 CIERRE_AMARILLO = (
     "Voy a dejar anotado todo lo que me contó para que el equipo lo revise con "
-    "calma. Es probable que lo llamen para verificar un par de cosas. "
-    "Si algo se pone peor antes de eso, avise de una vez. Que se mejore."
+    "calma. Es probable que lo llamen para verificar un par de cosas. Y si algo "
+    "se pone peor antes de esa llamada, póngase en contacto directamente con el "
+    "especialista a cargo de su cirugía o con su servicio de salud. Que se mejore."
 )
 
 # Reconocimiento breve antes de la siguiente pregunta. Cumple dos funciones: que
@@ -253,6 +266,9 @@ class EstadoLlamada:
     # Focos donde ya se pidió la cifra concreta. Se pide UNA vez: insistir dos
     # veces por un número que el paciente no tiene es hostigarlo.
     datos_pedidos: set[Foco] = field(default_factory=set)
+    # El cierre se anuncia antes de ejecutarse: colgar en seco tras la última
+    # pregunta deja al paciente con la palabra en la boca.
+    despedida_ofrecida: bool = False
     foco_actual: Foco | None = None
     cerrada: bool = False
     transcripcion: list[tuple[str, str]] = field(default_factory=list)
@@ -382,6 +398,15 @@ class Conversacion:
         # Si el agente acaba de pedir la temperatura, un número pelado es la
         # respuesta: "34." no trae la palabra fiebre pero ES la temperatura.
         en_contexto_fiebre = self.estado.foco_actual is Foco.FIEBRE
+
+        # Afirmación corta en contexto de fiebre: "He tenido", "sí, un poco".
+        # Caso real: Whisper cortó la frase en "He tenido" y el agente dijo
+        # "Perfecto, anotado" y cambió de tema — una afirmación de fiebre quedó
+        # sin pedir la cifra. La afirmación responde a LA PREGUNTA HECHA, y la
+        # pregunta era por fiebre.
+        if en_contexto_fiebre and _es_afirmacion(texto_paciente)                 and not fiebre.tiene_cifra(texto_paciente)                 and not fiebre.niega_fiebre(texto_paciente):
+            with self._lock:
+                self.estado.cuadro.fiebre_referida_sin_medir = True
         cifra_dicha = fiebre.extraer_cifra(
             texto_paciente, contexto_fiebre=en_contexto_fiebre
         )
@@ -447,6 +472,21 @@ class Conversacion:
             foco = self.estado.siguiente_foco()
 
         if foco is None:
+            if not self.estado.despedida_ofrecida:
+                # Último espacio antes de cerrar: la llamada no se corta en seco.
+                self.estado.despedida_ofrecida = True
+                texto = (
+                    f"{prefijo}Ya casi terminamos. Antes de despedirme: "
+                    "¿hay algo más que quiera contarme o preguntarme?"
+                )
+                self.estado.transcripcion.append(("agente", texto))
+                return RespuestaTurno(
+                    texto=texto,
+                    decision=decision,
+                    escala=False,
+                    cierra=False,
+                    alarmas_detectadas=detectadas,
+                )
             return self._cerrar(decision)
 
         es_repregunta = foco in self.estado.repreguntados
