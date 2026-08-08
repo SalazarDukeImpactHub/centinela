@@ -583,8 +583,13 @@ async def colgar(llamada_id: str) -> JSONResponse:
     if sesion is None:
         raise HTTPException(404, "llamada no encontrada")
 
-    await asyncio.get_running_loop().run_in_executor(
-        None, sesion.conversacion.esperar_extraccion
+    # Espera acotada. El valor por defecto de esperar_extraccion es 60 s: con el
+    # modelo local tardando ~17 s por turno, colgar podía quedarse un minuto sin
+    # devolver nada y la consola parecía trabada. Doce segundos alcanzan para la
+    # extracción típica; si no llegó, se cierra igual y el resumen deja
+    # constancia de lo que quedó sin preguntar.
+    completa = await asyncio.get_running_loop().run_in_executor(
+        None, sesion.conversacion.esperar_extraccion, 12.0
     )
     sesion.finalizada = True
 
@@ -616,6 +621,7 @@ async def colgar(llamada_id: str) -> JSONResponse:
             sesion.segundos_audio,
         ),
         "registro_turnos": str(sesion.registro.ruta.name),
+        "extraccion_completa": completa,
     }
     # El resumen se PERSISTE, no solo se devuelve: es el "resumen estructurado
     # de cada llamada" que exige el reto, y la evidencia de auditoría.
@@ -626,7 +632,17 @@ async def colgar(llamada_id: str) -> JSONResponse:
         _json.dumps(resumen, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    return JSONResponse({**_estado_publico(sesion), "resumen": resumen})
+    # La latencia del último turno viaja también en el cierre: sin ella, la
+    # consola pintaba "—" en tiempo de respuesta justo al colgar, borrando el
+    # dato que el jurado está mirando.
+    ultimo = sesion.registro.turnos[-1] if sesion.registro.turnos else None
+    return JSONResponse(
+        {
+            **_estado_publico(sesion),
+            "latencia_ms": round(ultimo.latencia_ms, 1) if ultimo else 0,
+            "resumen": resumen,
+        }
+    )
 
 
 # -- Conocimiento (G5) -----------------------------------------------------------

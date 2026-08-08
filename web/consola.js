@@ -320,13 +320,51 @@ function avisoEnLlamada(mensaje) {
 $('btnColgar').onclick = async () => {
   if (!llamadaId) return;
   $('btnColgar').disabled = true;
+  // El cierre espera a que termine la extracción pendiente para que el resumen
+  // sea fiel, y eso puede tardar unos segundos. Sin esta señal, la consola
+  // parecía trabada justo en el momento en que el jurado está mirando.
+  $('btnColgar').textContent = 'Cerrando y guardando el resumen…';
+  estado('Cerrando llamada', 'Consolidando el resumen clínico', 'var(--warn)');
   try {
     const r = await fetch(`/api/llamada/${llamadaId}/colgar`, { method: 'POST' });
-    pintar(await r.json());
+    const d = await r.json();
+    pintar(d);
+    if (d.resumen) resumenEnLlamada(d.resumen);
+  } catch (e) {
+    avisoEnLlamada('No se pudo cerrar limpiamente: ' + e.message);
   } finally {
+    $('btnColgar').textContent = 'Colgar';
     finalizar();
   }
 };
+
+/* Resumen al pie de la transcripción: el jurado lo pide como entregable y el
+ * operador necesita verlo sin abrir un archivo. */
+function resumenEnLlamada(r) {
+  const c = COLORES[r.semaforo_final] || COLORES.verde;
+  const filas = [
+    ['Temperatura', r.cuadro.fiebre_c != null ? r.cuadro.fiebre_c + ' °C' : 'sin dato'],
+    ['Dolor', r.cuadro.dolor_nrs != null ? r.cuadro.dolor_nrs + '/10' : 'sin dato'],
+    ['Herida', r.cuadro.herida],
+    ['Movilidad', r.cuadro.movilidad],
+  ];
+  const bloque = document.createElement('div');
+  bloque.className = 'dcin';
+  bloque.style.cssText =
+    `margin:8px 0 12px;max-width:760px;border:2px solid ${c.b};background:${c.f};border-radius:var(--r3);padding:14px 16px`;
+  bloque.innerHTML = `
+    <div style="font-size:15px;font-weight:800;color:${c.t}">Resumen de la llamada · ${c.n}</div>
+    <div style="margin-top:6px;font-size:13px;color:var(--text)">${esc(r.motivos.join(' · '))}</div>
+    <div style="margin-top:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      ${filas.map(([k, v]) => `<div><div class="lbl">${k}</div><div style="font-size:13px;font-weight:600">${esc(String(v))}</div></div>`).join('')}
+    </div>
+    ${r.sin_preguntar.length ? `<div class="mono" style="margin-top:9px;font-size:11px;color:var(--warn-t)">Quedó sin preguntar: ${esc(r.sin_preguntar.join(', '))}</div>` : ''}
+    <div class="mono" style="margin-top:9px;font-size:10.5px;color:var(--text-2)">
+      Registro turno a turno: ${esc(r.registro_turnos)} · costo estimado ${r.costo.total_usd} USD
+    </div>`;
+  $('tr').appendChild(bloque);
+  $('tr').scrollTop = $('tr').scrollHeight;
+}
 
 function finalizar() {
   clearInterval(relojT);
@@ -475,7 +513,10 @@ function pintar(d) {
 
   // Métricas
   const m = d.metricas;
-  $('mUlt').textContent = d.latencia_ms ? Math.round(d.latencia_ms) + ' ms' : '—';
+  // Solo se pisa si viene un valor: un turno sin latencia (la apertura, o el
+  // cierre en versiones anteriores) borraba el número que el jurado está
+  // mirando en ese momento.
+  if (d.latencia_ms) $('mUlt').textContent = Math.round(d.latencia_ms) + ' ms';
   $('mP50').textContent = m.latencia_p50_ms ? Math.round(m.latencia_p50_ms) + ' ms' : '—';
   $('mP95').textContent = m.latencia_p95_ms ? Math.round(m.latencia_p95_ms) + ' ms' : '—';
   $('mTok').textContent = (m.tokens_entrada + m.tokens_salida) || '—';
