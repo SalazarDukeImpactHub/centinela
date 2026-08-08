@@ -31,7 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src import config
-from src.clinico.escalamiento import Semaforo, evaluar
+from src.clinico.escalamiento import evaluar
 from src.conversacion.turno import Conversacion, EstadoLlamada
 from src.modelo.cliente import MODELO, ClienteLocal
 from src.observabilidad.metricas import RegistroLlamada, costo_estimado
@@ -623,8 +623,13 @@ async def colgar(llamada_id: str) -> JSONResponse:
             "disparada_en_turno": turno_alerta["turno"] if turno_alerta else None,
             "disparador": turno_alerta["motivos"] if turno_alerta else [],
             "dicho_por_el_paciente": turno_alerta["paciente"] if turno_alerta else "",
+            # Cuenta entradas con número de turno mayor, no una resta de índices:
+            # la cronología omite turnos sin habla del paciente (la apertura),
+            # así que su largo no coincide con la numeración.
             "turnos_posteriores": (
-                len(cronologia) - turno_alerta["turno"] if turno_alerta else 0
+                sum(1 for t in cronologia if t["turno"] > turno_alerta["turno"])
+                if turno_alerta
+                else 0
             ),
         }
         if decision.escala or turno_alerta

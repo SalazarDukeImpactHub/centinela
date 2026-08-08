@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-from src.clinico.escalamiento import Herida, Semaforo
+from src.clinico.escalamiento import Semaforo
 from src.conversacion.turno import (
     ORDEN_FOCOS,
     Conversacion,
@@ -204,7 +202,6 @@ class TestCaminoCritico:
         """Escalar ante una alarma cuesta cero tokens."""
         conv, cliente = _conversacion()
         conv.abrir()
-        antes = cliente.invocaciones
         r = conv.responder("no puedo respirar")
         assert r.escala
         # La extracción de fondo puede sumar una invocación, pero la DECISIÓN no.

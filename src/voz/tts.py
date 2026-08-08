@@ -44,7 +44,6 @@ VELOCIDAD = 1.0  # neutro: 1.12 sonaba arrastrado en llamada real
 # a una voz sintética antes que el timbre.
 PAUSA_ORACION_MS = 220
 PAUSA_PREGUNTA_MS = 300  # una pregunta pide más aire: invita a responder
-PAUSA_COMA_MS = 130
 
 # Números y símbolos que Piper lee mal o deletrea. Se expanden a palabras antes
 # de sintetizar: "38.5" leído dígito por dígito arruina el momento más

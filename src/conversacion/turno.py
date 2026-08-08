@@ -41,7 +41,7 @@ import unicodedata as _unicodedata
 from dataclasses import dataclass, field
 from enum import Enum
 
-from typing import Callable, Protocol
+from typing import Protocol
 
 from src.clinico import alarmas, fiebre
 from src.conversacion import preguntas
@@ -179,10 +179,6 @@ ESCALAMIENTO = (
     "lo estoy reportando al equipo de salud. Permítame terminar de preguntarle "
     "un par de cosas, así les paso la información completa."
 )
-
-# Cuando ya se avisó de la alerta y quedan preguntas, no se repite el anuncio:
-# se enlaza con lo que sigue.
-ESCALAMIENTO_EN_CURSO = "Sigo con la alerta abierta para el equipo."
 
 # Cierre de una llamada que escaló. Recapitula qué se reportó y qué sigue.
 CIERRE_ROJO = (

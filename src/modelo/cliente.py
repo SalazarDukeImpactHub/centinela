@@ -94,7 +94,17 @@ class ClienteLocal:
             "model": self.modelo,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": temperatura, "num_predict": max_tokens},
+            # num_thread 2: la extracción corre en segundo plano mientras el
+            # turno siguiente necesita CPU para sintetizar voz. Medido: con el
+            # modelo acaparando los 4 hilos lógicos, un turno que llegaba durante
+            # la extracción tardó 58 s. Dejarle 2 hilos al resto del pipeline
+            # alarga la extracción —que a nadie apura: es asíncrona— y protege
+            # la latencia percibida, que es la métrica que puntúa.
+            "options": {
+                "temperature": temperatura,
+                "num_predict": max_tokens,
+                "num_thread": 2,
+            },
         }
         if sistema:
             cuerpo["system"] = sistema
