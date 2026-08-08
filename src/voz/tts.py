@@ -34,16 +34,16 @@ FIN_DE_ORACION = re.compile(r"(?<=[.!?])\s+")
 # es_MX-claude-high, cuatro veces más rápida. La naturalidad se gana con ritmo,
 # no con timbre.
 #
-# Un agente clínico que habla un poco más lento que la conversación cotidiana se
-# percibe más humano y más confiable, y además da margen a un paciente mayor o
-# adolorido para seguir el hilo.
-VELOCIDAD = 1.12  # >1 alarga la duración: habla más pausado
+# Probado en llamada real: 1.12 se percibió arrastrado. La naturalidad viene de
+# las PAUSAS entre oraciones, no de estirar cada palabra — estirarlas suena a
+# grabación en cámara lenta. Velocidad neutra y silencios cortos entre frases.
+VELOCIDAD = 1.0  # neutro: 1.12 sonaba arrastrado en llamada real
 
 # Silencios entre unidades de habla. Piper no los produce solo: sin esto, todas
 # las oraciones salen pegadas con la misma cadencia plana, que es lo que delata
 # a una voz sintética antes que el timbre.
-PAUSA_ORACION_MS = 320
-PAUSA_PREGUNTA_MS = 420  # una pregunta pide más aire: invita a responder
+PAUSA_ORACION_MS = 220
+PAUSA_PREGUNTA_MS = 300  # una pregunta pide más aire: invita a responder
 PAUSA_COMA_MS = 130
 
 # Números y símbolos que Piper lee mal o deletrea. Se expanden a palabras antes

@@ -35,9 +35,13 @@ class TestCifrasHabladas:
 
 
 class TestCadencia:
-    def test_habla_mas_pausado_que_el_valor_neutro(self):
-        """Un agente clínico apurado se percibe menos confiable."""
-        assert VELOCIDAD > 1.0
+    def test_la_velocidad_no_arrastra_la_voz(self):
+        """Probado en llamada real: 1.12 se percibió arrastrado.
+
+        La naturalidad viene de las pausas entre oraciones, no de estirar cada
+        palabra — estirarlas suena a grabación en cámara lenta.
+        """
+        assert 0.95 <= VELOCIDAD <= 1.05
 
     def test_la_pregunta_deja_mas_aire_que_la_afirmacion(self):
         """El silencio tras una pregunta es parte de la invitación a responder."""

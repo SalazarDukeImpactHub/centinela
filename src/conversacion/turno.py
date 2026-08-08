@@ -97,16 +97,16 @@ REPREGUNTAS: dict[Foco, tuple[str, ...]] = {
         "A ver, dígame esto: ¿anoche o hoy sintió el cuerpo caliente o con frío raro?",
     ),
     Foco.HERIDA: (
-        "¿La ha alcanzado a mirar hoy? Con saber de qué color está me ayuda bastante.",
-        "Cuando pueda mírela un momento: ¿se ve rosada normal, o roja, o con algo saliendo?",
+        "Volvamos a la herida un momento: ¿la ha alcanzado a mirar hoy?",
+        "Le insisto con la herida porque es importante: ¿se ve rosada normal, o roja, o con algo saliendo?",
     ),
     Foco.DOLOR: (
-        "Aunque sea por encimita: ¿el dolor lo deja dormir y moverse tranquilo?",
-        "Dígame al menos esto: ¿el dolor lo dejó dormir anoche?",
+        "Sobre el dolor, aunque sea por encimita: ¿lo deja dormir y moverse tranquilo?",
+        "Volviendo al dolor: ¿lo dejó dormir anoche?",
     ),
     Foco.MOVILIDAD: (
-        "¿Se levanta de la cama sin que nadie lo ayude?",
-        "¿Puede ir al baño y volver por su cuenta?",
+        "Sobre el movimiento: ¿se levanta de la cama sin que nadie lo ayude?",
+        "Le pregunto de nuevo por la movilidad: ¿puede ir al baño y volver por su cuenta?",
     ),
 }
 
@@ -208,6 +208,18 @@ _ECOS_HERIDA = [
 def _sin_tildes(texto: str) -> str:
     plano = _unicodedata.normalize("NFD", texto.lower())
     return "".join(c for c in plano if _unicodedata.category(c) != "Mn")
+
+
+def _eco_intensidad(intensidad: str | None) -> str | None:
+    """Confirma la intensidad dicha en palabras, sin inventar un número."""
+    if intensidad == "alta":
+        return (
+            "Fiebre alta sin termómetro, entiendo. Lo dejo anotado así, "
+            "y si consigue medirla me avisa."
+        )
+    if intensidad == "baja":
+        return "Poca fiebre, anotado."
+    return None
 
 
 def _eco(texto_paciente: str, cifra_dicha: float | None, foco: Foco | None) -> str | None:
@@ -363,6 +375,35 @@ class Conversacion:
         hilo.start()
         self._extraccion = hilo
 
+    def _confirmar_registro(self) -> str:
+        """Le dice al paciente qué quedó anotado hasta ahora, con sus valores.
+
+        Se construye desde el cuadro clínico —lo que el sistema realmente
+        tiene— así que nunca puede confirmar un dato que no registró.
+        """
+        with self._lock:
+            cuadro = self.estado.cuadro
+            partes: list[str] = []
+            if cuadro.fiebre_c is not None:
+                partes.append(f"su temperatura de {cuadro.fiebre_c} grados")
+            elif cuadro.fiebre_referida_sin_medir:
+                partes.append("que tuvo fiebre, aunque sin el número exacto")
+            if cuadro.dolor_nrs is not None:
+                partes.append(f"el dolor en {cuadro.dolor_nrs} de diez")
+            if cuadro.herida.value != "desconocido":
+                etiquetas = {
+                    "normal": "que la herida se ve bien",
+                    "eritema_leve": "que la herida está enrojecida",
+                    "secrecion_purulenta": "la secreción de la herida",
+                }
+                partes.append(etiquetas[cuadro.herida.value])
+
+        if not partes:
+            return "Todavía no he podido anotar nada concreto, por eso le pregunto."
+        if len(partes) == 1:
+            return f"Sí señor, tengo anotado {partes[0]}."
+        return f"Sí señor, tengo anotado {', '.join(partes[:-1])} y {partes[-1]}."
+
     def esperar_extraccion(self, timeout: float = 60.0) -> bool:
         """Bloquea hasta que termine la extracción pendiente.
 
@@ -407,6 +448,7 @@ class Conversacion:
         if en_contexto_fiebre and _es_afirmacion(texto_paciente)                 and not fiebre.tiene_cifra(texto_paciente)                 and not fiebre.niega_fiebre(texto_paciente):
             with self._lock:
                 self.estado.cuadro.fiebre_referida_sin_medir = True
+
         cifra_dicha = fiebre.extraer_cifra(
             texto_paciente, contexto_fiebre=en_contexto_fiebre
         )
@@ -417,6 +459,22 @@ class Conversacion:
         elif fiebre.refiere_fiebre_sin_cifra(texto_paciente):
             with self._lock:
                 self.estado.cuadro.fiebre_referida_sin_medir = True
+
+        # Intensidad dicha en palabras cuando se pidió el número: "Mucho."
+        # Caso real: el paciente respondió "Mucho" a la pregunta por la
+        # temperatura y el agente dijo "eso me sirve saberlo" y cambió de tema.
+        # Sin termómetro no hay cifra, pero SÍ hay dato: la fiebre queda
+        # referida y el eco confirma que se escuchó.
+        intensidad = None
+        if (
+            en_contexto_fiebre
+            and cifra_dicha is None
+            and not fiebre.niega_fiebre(texto_paciente)
+        ):
+            intensidad = fiebre.intensidad_referida(texto_paciente)
+            if intensidad:
+                with self._lock:
+                    self.estado.cuadro.fiebre_referida_sin_medir = True
 
         # 2. La extracción arranca en segundo plano y no bloquea nada.
         self._extraer_en_segundo_plano(texto_paciente, foco_previo)
@@ -435,6 +493,11 @@ class Conversacion:
         prefijo = ""
         if preguntas.habla_un_tercero(texto_paciente):
             prefijo = ACUSE_TERCERO + " "
+        elif preguntas.es_verificacion(texto_paciente):
+            # "¿Anotaste el número?" se responde desde el estado del sistema, no
+            # desde el corpus: al paciente que quiere saber si lo escucharon,
+            # contestarle "no está en mi documentación" lo trata como máquina.
+            prefijo = self._confirmar_registro() + " "
         elif not decision.escala and preguntas.contiene_pregunta(texto_paciente):
             respuesta_corpus = self.consultor(texto_paciente) if self.consultor else None
             prefijo = (respuesta_corpus or SIN_RESPUESTA) + " "
@@ -498,8 +561,10 @@ class Conversacion:
 
         # El acuse refleja el dato recien escuchado cuando lo hay; si no, una
         # variante generica. "34, listo" vale mas que tres "Listo, gracias".
-        acuse = _eco(texto_paciente, cifra_dicha, foco_respondido) or _elegir(
-            ACUSES[decision.semaforo]
+        acuse = (
+            _eco_intensidad(intensidad)
+            or _eco(texto_paciente, cifra_dicha, foco_respondido)
+            or _elegir(ACUSES[decision.semaforo])
         )
         texto = f"{prefijo}{acuse} {pregunta}"
         self.estado.transcripcion.append(("agente", texto))

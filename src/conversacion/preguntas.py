@@ -48,6 +48,20 @@ TERCEROS = [
 _INTERROGATIVAS = [re.compile(p) for p in INTERROGATIVAS]
 _TERCEROS = [re.compile(p) for p in TERCEROS]
 
+# Preguntas SIN signo de interrogación, como llegan de la transcripción de voz.
+# Caso real: "Anotaste en cuánto tengo la fiebre el número" es una pregunta y
+# ninguna forma clásica la reconocía — el agente la ignoró y siguió su guion.
+# Son verbos con los que el paciente verifica que se le escuchó.
+VERBOS_DE_VERIFICACION = {
+    "anoto", "anoto", "anotaste", "anotaron", "anotó",
+    "registro", "registraste", "registraron", "registró",
+    "escucho", "escuchaste", "escuchó", "escucharon",
+    "entendio", "entendiste", "entendió",
+    "quedo", "quedó", "quedaron",
+    "tiene", "tienes", "tenes",
+    "apunto", "apuntaste", "apuntó",
+}
+
 
 def _normalizar(texto: str) -> str:
     sin_tildes = unicodedata.normalize("NFD", texto.lower())
@@ -56,7 +70,23 @@ def _normalizar(texto: str) -> str:
 
 def contiene_pregunta(texto: str) -> bool:
     normalizado = _normalizar(texto)
-    return any(p.search(normalizado) for p in _INTERROGATIVAS)
+    if any(p.search(normalizado) for p in _INTERROGATIVAS):
+        return True
+    return es_verificacion(texto)
+
+
+def es_verificacion(texto: str) -> bool:
+    """El paciente pregunta si se registró lo que dijo: "¿anotaste el número?".
+
+    No es una consulta clínica y no debe buscarse en el corpus: se responde
+    desde el estado del propio sistema. Contestarle "no tengo esa información
+    en la documentación" a alguien que solo quiere saber si lo escucharon es
+    justamente lo que hace sentir al paciente que habla con una máquina.
+    """
+    normalizado = _normalizar(texto)
+    palabras = re.findall(r"[a-z]+", normalizado)
+    # El verbo aparece en las dos primeras posiciones: "anotaste...", "me anotó...".
+    return any(p in VERBOS_DE_VERIFICACION for p in palabras[:2])
 
 
 def habla_un_tercero(texto: str) -> bool:

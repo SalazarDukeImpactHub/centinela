@@ -91,6 +91,38 @@ def tiene_cifra(texto: str) -> bool:
     return any(p.search(normalizado) for p in _CIFRAS)
 
 
+# Intensidad dicha en palabras cuando el agente pide la cifra. Caso real: el
+# agente preguntó la temperatura, el paciente respondió "Mucho." y el sistema
+# dijo "eso me sirve saberlo" y cambió de tema — ignoró el síntoma. Una
+# intensidad alta sin termómetro NO es un dato menor: es fiebre referida.
+#
+# Se compara por CONJUNTOS DE PALABRAS y no por expresión regular: es lo mismo
+# de expresivo acá, y no depende del escapado — un patrón mal escapado falla en
+# silencio, que en esta capa significa ignorar un síntoma sin que nadie lo note.
+INTENSIDAD_ALTA = {
+    "mucho", "mucha", "muchisimo", "muchisima", "altisima", "altisimo",
+    "bastante", "harto", "harta", "fuerte", "terrible", "alta", "alto",
+}
+INTENSIDAD_BAJA = {
+    "poquito", "poquita", "poco", "poca", "leve", "levemente", "apenas",
+    "ligera", "ligero", "poquitico",
+}
+
+
+def _palabras(texto: str) -> set[str]:
+    return set(re.findall(r"[a-z]+", _normalizar(texto)))
+
+
+def intensidad_referida(texto: str) -> str | None:
+    """Intensidad de fiebre dicha en palabras: 'alta', 'baja' o None."""
+    palabras = _palabras(texto)
+    if palabras & INTENSIDAD_ALTA:
+        return "alta"
+    if palabras & INTENSIDAD_BAJA:
+        return "baja"
+    return None
+
+
 def refiere_fiebre_sin_cifra(texto: str) -> bool:
     """Dijo tener fiebre pero no dio el número. Hay que pedírselo en este turno."""
     return menciona_fiebre(texto) and not tiene_cifra(texto)
