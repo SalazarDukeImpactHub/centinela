@@ -115,11 +115,28 @@ Cuando aparezca `Application startup complete` → **http://localhost:8080**.
 El punto verde de la cabecera es el `GET /api/salud`: verde significa que
 índice, voz, modelo y transcripción están **de verdad** en pie.
 
+**Medido de punta a punta** en el hardware de referencia (i3-1005G1, 2 núcleos,
+sin GPU) con la imagen ya construida:
+
+<div align="center">
+
+| `docker compose up` → sistema operativo |
+|:---:|
+| **6 min 07 s** |
+| *incluida la descarga del modelo de 2 GB* |
+
+</div>
+
 | Etapa | Primera vez | Siguientes |
 |---|---|---|
-| `docker compose build` | ~12 min (torch CPU, voz, embeddings) | segundos (caché) |
-| Descarga `llama3.2:3b` | ~4 min a 100 Mbps (persiste en volumen) | 0 |
-| Arranque del servicio | ~40 s (carga y **calienta** los modelos) | ~40 s |
+| `docker compose build` | 8 min 39 s (torch CPU, voz, embeddings) | segundos (caché) |
+| `compose up` → API respondiendo | 4 min 50 s | ~50 s |
+| Descarga `llama3.2:3b` | +1 min 17 s (persiste en volumen) | 0 |
+
+> **Requisito de memoria:** Docker necesita al menos 6 GB. En Windows, si WSL
+> reclama más de lo que el equipo puede sostener, el constructor muere a mitad
+> del build con `error reading from server: EOF`. Se limita con un `.wslconfig`:
+> `[wsl2]` / `memory=6GB` / `swap=4GB`.
 
 La imagen sale del build con todo adentro —voz de Piper, embeddings, índice
 vectorial pre-construido— para que **ninguna descarga corra contra el reloj**
