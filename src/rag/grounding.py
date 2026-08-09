@@ -37,12 +37,16 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from src.rag import saneamiento
+from src.rag import bilingue, saneamiento
 from src.rag.index import IndiceClinico, Recuperado
 
 # Piso de similitud. Bajo a propósito: acá solo descarta lo abiertamente ajeno.
 # El trabajo fino lo hacen el filtro de escenario y la verificación léxica.
 UMBRAL_SIMILITUD = 0.85
+
+# Cuántos fragmentos se recuperan antes de filtrar por escenario y por léxico.
+# Amplio a propósito: la precisión la aporta el filtro, no el recorte temprano.
+RECUPERACION_AMPLIA = 40
 
 # Proporción de los términos distintivos de la consulta que debe aparecer en el
 # fragmento. Una sola coincidencia no basta: una guía de cadera menciona "corazón"
@@ -224,7 +228,26 @@ def verificar(
             motivo="procedimiento fuera del alcance del corpus clínico",
         )
 
-    candidatos = indice.buscar(consulta, k=k * 3 if escenario else k)
+    # Búsqueda bilingüe. El corpus mezcla idiomas y el embedding multilingüe
+    # acerca pero no siempre alcanza: una pregunta coloquial en español podía no
+    # recuperar NINGÚN fragmento del escenario correcto cuando sus documentos
+    # están en inglés. Se consulta también con la variante en inglés y se
+    # fusionan los resultados por chunk_id, conservando la mejor similitud.
+    # Red ancha, filtro preciso. MEDIDO: con k=15 los fragmentos que realmente
+    # tratan el tema no entraban entre los recuperados —el embedding traía
+    # formularios y texto genérico que puntúan alto sin hablar de nada—, y la
+    # verificación léxica los rechazaba con razón, dejando la consulta sin
+    # respuesta. Con k=40 aparecen, y la búsqueda cuesta ~50 ms: es barata
+    # comparada con lo que ya gasta el turno.
+    n = RECUPERACION_AMPLIA if escenario else k
+    candidatos = indice.buscar(consulta, k=n)
+    en_ingles = bilingue.traducir_consulta(consulta)
+    if en_ingles:
+        vistos = {c.chunk_id for c in candidatos}
+        candidatos += [
+            c for c in indice.buscar(en_ingles, k=n) if c.chunk_id not in vistos
+        ]
+        candidatos.sort(key=lambda c: c.similitud, reverse=True)
 
     if escenario:
         del_escenario = [c for c in candidatos if c.escenario == escenario]
@@ -233,7 +256,7 @@ def verificar(
                 permitido=False,
                 motivo=f"sin documentación del procedimiento del paciente ({escenario})",
             )
-        candidatos = del_escenario[:k]
+        candidatos = del_escenario
 
     if not candidatos:
         return Veredicto(permitido=False, motivo="sin resultados en el corpus")
@@ -258,11 +281,20 @@ def verificar(
     # aquí bloqueaba consultas legítimas contra los documentos en inglés del
     # corpus, donde el solapamiento léxico en español es estructuralmente nulo.
     minimo = 1 if len(distintivos) <= 2 else math.ceil(len(distintivos) * PROPORCION_TERMINOS)
-    con_lexico = [
-        c
-        for c in sobre_umbral
-        if len(distintivos & _terminos(c.texto, distintivos=True)) >= minimo
-    ]
+
+    # La comparación es bilingüe: "bañar" nunca coincidiría con "shower", y el
+    # corpus de colecistitis y mama está mayormente en inglés. Cada término de
+    # la consulta se compara contra sus equivalentes en el otro idioma.
+    def _coincidencias(texto_fragmento: str) -> int:
+        del_fragmento = _terminos(texto_fragmento, distintivos=True)
+        return sum(
+            1
+            for termino in distintivos
+            if bilingue.equivalentes_de(termino) & del_fragmento
+            or termino in del_fragmento
+        )
+
+    con_lexico = [c for c in sobre_umbral if _coincidencias(c.texto) >= minimo]
     if not con_lexico:
         return Veredicto(
             permitido=False,

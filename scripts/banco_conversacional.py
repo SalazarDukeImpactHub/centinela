@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.clinico.escalamiento import Semaforo, evaluar  # noqa: E402
+from src.clinico.escalamiento import evaluar  # noqa: E402
 from src.conversacion.turno import Conversacion, EstadoLlamada  # noqa: E402
 from src.modelo.cliente import ClienteLocal  # noqa: E402
 
