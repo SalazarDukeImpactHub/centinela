@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from src.clinico.escalamiento import Herida, Semaforo, evaluar, CuadroClinico
+from src.clinico.escalamiento import Herida, Semaforo
 from src.clinico.herida import estado_referido
 from src.conversacion.turno import Conversacion, EstadoLlamada, Foco
 

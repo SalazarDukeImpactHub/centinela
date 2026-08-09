@@ -44,9 +44,17 @@ from enum import Enum
 from typing import Protocol
 
 from src.clinico import alarmas, fiebre
+from src.clinico import dolor as dolor_deteccion
 from src.clinico import herida as herida_deteccion
 from src.conversacion import preguntas
-from src.clinico.escalamiento import CuadroClinico, Decision, Herida, Semaforo, evaluar
+from src.clinico.escalamiento import (
+    CuadroClinico,
+    Decision,
+    Herida,
+    Movilidad,
+    Semaforo,
+    evaluar,
+)
 from src.clinico.extraccion import extraer
 from src.modelo.cliente import ClienteLocal
 
@@ -312,17 +320,27 @@ def _eco(texto_paciente: str, cifra_dicha: float | None, foco: Foco | None) -> s
         estado = herida_deteccion.estado_referido(texto_paciente)
         ecos = {
             "secrecion_purulenta": "Eso que le sale de la herida es importante, lo anoto tal cual.",
-            "eritema_leve": "Roja e hinchada, entiendo.",
+            "eritema_leve": "Enrojecida, entendido.",
             "normal": "La ve tranquila, qué bueno.",
             "desconocido": "Entiendo que no la ha podido mirar.",
         }
         if estado:
             return ecos[estado]
     if foco is Foco.DOLOR:
-        plano = _sin_tildes(texto_paciente)
-        numeros = _re.findall(r"\b([0-9]|10)\b", plano)
-        if numeros:
-            return f"Un {numeros[0]} de dolor, anotado."
+        # Desde el detector, no desde un regex propio: "Siete." también es un 7,
+        # y "me duele harto" es un 8. El eco debe reflejar lo que se GUARDÓ.
+        nivel = dolor_deteccion.nivel_dolor(texto_paciente)
+        if nivel is not None:
+            return "Sin dolor, qué bueno." if nivel == 0 else f"Un {nivel} de dolor, anotado."
+    if foco is Foco.MOVILIDAD:
+        estado = dolor_deteccion.estado_movilidad(texto_paciente)
+        ecos_mov = {
+            "incapacitante_nueva": "Que no se pueda mover es importante, lo anoto.",
+            "limitada_esperada": "Se mueve con dificultad, entendido.",
+            "normal": "Se mueve bien, me alegra.",
+        }
+        if estado:
+            return ecos_mov[estado]
     return None
 
 # Acuse cuando el paciente cuenta algo que preocupa. Reconoce lo que dijo antes
@@ -547,6 +565,24 @@ class Conversacion:
                 with self._lock:
                     self.estado.cuadro.herida = Herida(estado_herida)
 
+        # 1a-ter. Dolor y movilidad, también en código y en este turno. El eco
+        #   decía "Un 7 de dolor, anotado" sin guardarlo: el resumen cerraba con
+        #   "sin dato". Un eco que afirma haber anotado lo que no anotó es peor
+        #   que no ecoar.
+        nivel_dolor = None
+        if self.estado.foco_actual is Foco.DOLOR:
+            nivel_dolor = dolor_deteccion.nivel_dolor(texto_paciente)
+            if nivel_dolor is not None:
+                with self._lock:
+                    self.estado.cuadro.dolor_nrs = nivel_dolor
+
+        estado_movilidad = None
+        if self.estado.foco_actual is Foco.MOVILIDAD:
+            estado_movilidad = dolor_deteccion.estado_movilidad(texto_paciente)
+            if estado_movilidad:
+                with self._lock:
+                    self.estado.cuadro.movilidad = Movilidad(estado_movilidad)
+
         # 1b. Fiebre en código y en este mismo turno, en sus dos variantes.
         #     Por la vía de la extracción ambas llegarían un turno tarde.
         #     - Cifra dicha en voz alta: decide el semáforo YA. "Tuve 38" seguido
@@ -715,6 +751,8 @@ class Conversacion:
             and not prefijo_cifra  # ya se abandonó la cifra: no reintentar encima
             and cifra_dicha is None  # una cifra captada ES el dato
             and estado_herida is None  # un estado de herida detectado también
+            and nivel_dolor is None
+            and estado_movilidad is None
             and not _aporta_dato(texto_paciente, foco_respondido_previo)
             and foco_respondido_previo not in self.estado.reintentados
         ):
@@ -794,8 +832,22 @@ class Conversacion:
 
         # El acuse refleja el dato recien escuchado cuando lo hay; si no, una
         # variante generica. "34, listo" vale mas que tres "Listo, gracias".
+        # Si ya se reintentó este tema y sigue sin entenderse, se dice la verdad
+        # en vez de "Perfecto, anotado": el paciente respondió "¡O-HA!" y recibió
+        # un acuse de conformidad sobre un turno que no aportó nada.
+        sin_dato_tras_reintento = (
+            foco_respondido is not None
+            and foco_respondido in self.estado.reintentados
+            and cifra_dicha is None
+            and estado_herida is None
+            and nivel_dolor is None
+            and estado_movilidad is None
+            and not _aporta_dato(texto_paciente, foco_respondido)
+        )
         acuse = (
-            _eco_intensidad(intensidad)
+            (f"No logré captar lo de {foco_respondido.value}, lo dejo pendiente."
+             if sin_dato_tras_reintento else None)
+            or _eco_intensidad(intensidad)
             or _eco(texto_paciente, cifra_dicha, foco_respondido)
             or _elegir(ACUSES[decision.semaforo])
         )

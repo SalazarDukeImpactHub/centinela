@@ -68,8 +68,21 @@ def _normalizar(texto: str) -> str:
     return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn")
 
 
+# Un verbo modal negado NO es una pregunta: es una queja. Caso real: "No me
+# puedo mover" se detectó como pregunta por el "puedo", se buscó en el corpus y
+# recibió "no está en mi documentación" — mientras la movilidad quedaba en
+# "desconocido" con el paciente diciendo que no puede moverse.
+_NEGACION_MODAL = re.compile(
+    r"\b(no|tampoco|casi no|ya no)\b[^.,;?]{0,20}\b(puedo|podia|logro|consigo|"
+    r"debo|tengo que|me puedo|se puede)\b"
+)
+
+
 def contiene_pregunta(texto: str) -> bool:
     normalizado = _normalizar(texto)
+    # Sin signo de interrogación, una negación modal es afirmación, no pregunta.
+    if _NEGACION_MODAL.search(normalizado) and "?" not in texto:
+        return False
     if any(p.search(normalizado) for p in _INTERROGATIVAS):
         return True
     return es_verificacion(texto)
