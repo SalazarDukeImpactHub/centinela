@@ -161,6 +161,11 @@ def _fusionar(previo: CuadroClinico, nuevo: dict) -> CuadroClinico:
         movilidad=movilidad,
         sintomas_alarma=alarmas,
         fiebre_referida_sin_medir=sin_medir and fiebre_final is None,
+        # Se arrastra explícitamente: la fusión construye un cuadro NUEVO, y
+        # todo campo que no se copie acá se pierde en cada extracción. Los
+        # marcadores de minimización se acumulan durante toda la llamada y
+        # quedaban en cero, dejando la regla sin efecto.
+        marcadores_minimizacion=previo.marcadores_minimizacion,
     )
 
 

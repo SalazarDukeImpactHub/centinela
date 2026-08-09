@@ -211,17 +211,53 @@ let silencioMs = 0;
 let capturaAutomatica = false;
 let manualActivo = false;
 
+/* Barge-in: el paciente puede interrumpir al agente mientras habla.
+ *
+ * Es lo que separa una llamada de un contestador. Un paciente que quiere decir
+ * "no, espere, se me olvidó contarle algo" no debería tener que esperar a que
+ * el agente termine su frase — y menos si lo que quiere decir es urgente.
+ *
+ * El umbral es MÁS ALTO que el de la escucha normal porque el parlante está
+ * sonando: hay que distinguir la voz del paciente del eco del propio agente.
+ * Y se exige voz sostenida, no un ruido suelto. */
+const UMBRAL_INTERRUPCION = 0.075;
+const VOZ_PARA_INTERRUMPIR_MS = 300;
+let vozDuranteAudioMs = 0;
+
+function nivelDeVoz() {
+  const buf = new Uint8Array(analizador.fftSize);
+  analizador.getByteTimeDomainData(buf);
+  let suma = 0;
+  for (const v of buf) { const x = (v - 128) / 128; suma += x * x; }
+  return Math.sqrt(suma / buf.length);
+}
+
 setInterval(() => {
+  // Mientras el agente habla, se escucha por si el paciente interrumpe.
+  if (analizador && audioActual && llamadaId && !procesando) {
+    if (nivelDeVoz() > UMBRAL_INTERRUPCION) {
+      vozDuranteAudioMs += 100;
+      if (vozDuranteAudioMs >= VOZ_PARA_INTERRUMPIR_MS) {
+        audioActual.onended = null;
+        audioActual.pause();
+        audioActual = null;
+        vozDuranteAudioMs = 0;
+        estado('Escuchando', 'Adelante, lo escucho', 'var(--accent)');
+        // La captura arranca en el ciclo siguiente, ya sin audio sonando.
+      }
+    } else {
+      vozDuranteAudioMs = 0;
+    }
+    return;
+  }
+  vozDuranteAudioMs = 0;
+
   if (!analizador || !llamadaId || procesando || audioActual || manualActivo) {
     if (capturaAutomatica) { capturaAutomatica = false; descartarGrabacion(); }
     vozMs = 0; silencioMs = 0;
     return;
   }
-  const buf = new Uint8Array(analizador.fftSize);
-  analizador.getByteTimeDomainData(buf);
-  let suma = 0;
-  for (const v of buf) { const x = (v - 128) / 128; suma += x * x; }
-  const rms = Math.sqrt(suma / buf.length);
+  const rms = nivelDeVoz();
 
   if (rms > UMBRAL_VOZ) { vozMs += 100; silencioMs = 0; }
   else { silencioMs += 100; if (!capturaAutomatica) vozMs = 0; }

@@ -43,7 +43,7 @@ from enum import Enum
 
 from typing import Protocol
 
-from src.clinico import alarmas, fiebre
+from src.clinico import alarmas, fiebre, minimizacion
 from src.clinico import dolor as dolor_deteccion
 from src.clinico import herida as herida_deteccion
 from src.conversacion import preguntas
@@ -569,6 +569,14 @@ class Conversacion:
 
         # 1. Alarmas sobre el texto crudo. Determinista, microsegundos, no espera
         #    a la extracción: es la señal que no puede llegar tarde.
+        # Minimización: se acumula a lo largo de la llamada. No es un síntoma
+        # sino una señal sobre CÓMO reporta el paciente, y por eso solo pondera
+        # hallazgos ya detectados — sobre un cuadro verde no hace nada.
+        marcadores = minimizacion.contar(texto_paciente)
+        if marcadores:
+            with self._lock:
+                self.estado.cuadro.marcadores_minimizacion += marcadores
+
         detectadas = alarmas.detectar(texto_paciente)
         if detectadas:
             with self._lock:

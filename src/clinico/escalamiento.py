@@ -48,6 +48,10 @@ FIEBRE_AMARILLO = 37.5
 # Por debajo de esto la temperatura reportada es hipotermia o una medición mal
 # tomada. Ninguna de las dos se ignora: ambas ameritan verificar.
 TEMPERATURA_BAJA = 35.5
+# Marcadores de minimización que, sobre un cuadro con hallazgos, lo elevan a
+# rojo. Calibrado contra los 160 casos: ver el comentario en evaluar().
+MINIMIZACION_PARA_ESCALAR = 6
+
 DOLOR_ROJO = 8
 DOLOR_AMARILLO = 4
 
@@ -73,6 +77,10 @@ class CuadroClinico:
     # es un error clínico, así que se registra el dato como lo que es —una
     # sospecha sin medir— y se pide el número.
     fiebre_referida_sin_medir: bool = False
+    # Marcadores de minimización acumulados en la llamada. No es un síntoma:
+    # es una señal sobre CÓMO reporta el paciente, y por eso solo pondera
+    # hallazgos ya detectados — nunca crea uno.
+    marcadores_minimizacion: int = 0
 
     @property
     def campos_faltantes(self) -> list[str]:
@@ -185,6 +193,35 @@ def evaluar(cuadro: CuadroClinico) -> Decision:
 
     if motivos_rojo:
         return Decision(Semaforo.ROJO, motivos_rojo, cuadro)
+
     if motivos_amarillo:
+        # Minimización sistemática sobre un cuadro que YA tiene hallazgos.
+        #
+        # MEDIDO sobre los 160 casos: los pacientes rojo minimizan mucho más
+        # (mediana 6 marcadores por llamada) que los verde (mediana 2). El que
+        # está peor es el que más resta importancia — quien tiene 9 de dolor y
+        # dice "un poquito molesto, uno aguanta" no informa mal: aguanta.
+        #
+        # La señal SOLO pondera hallazgos existentes, nunca crea uno: sobre un
+        # cuadro verde no hace nada. Calibrada en 6 marcadores, recupera los 2
+        # casos rojo que ningún extractor podía sacar de lo que el paciente
+        # dijo, al costo de 8 escalamientos de más sobre 148 casos no-rojo.
+        #
+        # La compensación es deliberada y es la que pide el reto: un falso
+        # negativo en posoperatorio es riesgo clínico; un falso positivo cuesta
+        # una llamada de verificación.
+        if cuadro.marcadores_minimizacion >= MINIMIZACION_PARA_ESCALAR:
+            return Decision(
+                Semaforo.ROJO,
+                [
+                    *motivos_amarillo,
+                    f"el paciente minimiza de forma sostenida "
+                    f"({cuadro.marcadores_minimizacion} señales) sobre un cuadro "
+                    f"con hallazgos — su autorreporte puede estar por debajo de "
+                    f"lo real",
+                ],
+                cuadro,
+            )
         return Decision(Semaforo.AMARILLO, motivos_amarillo, cuadro)
+
     return Decision(Semaforo.VERDE, ["sin hallazgos de alarma"], cuadro)
