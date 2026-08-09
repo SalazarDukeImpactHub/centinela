@@ -44,8 +44,9 @@ from enum import Enum
 from typing import Protocol
 
 from src.clinico import alarmas, fiebre
+from src.clinico import herida as herida_deteccion
 from src.conversacion import preguntas
-from src.clinico.escalamiento import CuadroClinico, Decision, Semaforo, evaluar
+from src.clinico.escalamiento import CuadroClinico, Decision, Herida, Semaforo, evaluar
 from src.clinico.extraccion import extraer
 from src.modelo.cliente import ClienteLocal
 
@@ -93,8 +94,8 @@ PREGUNTAS: dict[Foco, tuple[str, ...]] = {
 
 REPREGUNTAS: dict[Foco, tuple[str, ...]] = {
     Foco.FIEBRE: (
-        "Se lo pregunto de otra manera: ¿en algún momento se sintió caliente o destemplado?",
-        "A ver, dígame esto: ¿anoche o hoy sintió el cuerpo caliente o con frío raro?",
+        "Se lo pregunto de otra manera: ¿en algún momento sintió el cuerpo caliente?",
+        "A ver, dígame esto: ¿anoche o hoy sintió mucho frío, o el cuerpo muy caliente?",
     ),
     Foco.HERIDA: (
         "Volvamos a la herida un momento: ¿la ha alcanzado a mirar hoy?",
@@ -305,10 +306,18 @@ def _eco(texto_paciente: str, cifra_dicha: float | None, foco: Foco | None) -> s
         entero = int(cifra_dicha) if cifra_dicha == int(cifra_dicha) else cifra_dicha
         return f"{entero}, listo."
     if foco is Foco.HERIDA:
-        plano = _sin_tildes(texto_paciente)
-        for patron, frase in _ECOS_HERIDA:
-            if patron.search(plano):
-                return frase
+        # El eco sale del estado DETECTADO, no del primer adjetivo del texto:
+        # ante "roja, hinchada y le sale líquido" decir "me dice que la ve roja"
+        # es quedarse con el hallazgo menos grave de los tres.
+        estado = herida_deteccion.estado_referido(texto_paciente)
+        ecos = {
+            "secrecion_purulenta": "Eso que le sale de la herida es importante, lo anoto tal cual.",
+            "eritema_leve": "Roja e hinchada, entiendo.",
+            "normal": "La ve tranquila, qué bueno.",
+            "desconocido": "Entiendo que no la ha podido mirar.",
+        }
+        if estado:
+            return ecos[estado]
     if foco is Foco.DOLOR:
         plano = _sin_tildes(texto_paciente)
         numeros = _re.findall(r"\b([0-9]|10)\b", plano)
@@ -527,6 +536,17 @@ class Conversacion:
 
         prefijo_cifra = ""
 
+        # 1a-bis. Estado de la herida en código y en este mismo turno. Por la vía
+        #   de la extracción llegaba un turno tarde: "roja, hinchada y le sale
+        #   líquido" recibía el eco de "roja" y la llamada seguía en amarillo,
+        #   con una secreción —que escala sola— registrada como eritema leve.
+        estado_herida = None
+        if self.estado.foco_actual is Foco.HERIDA:
+            estado_herida = herida_deteccion.estado_referido(texto_paciente)
+            if estado_herida and estado_herida != "desconocido":
+                with self._lock:
+                    self.estado.cuadro.herida = Herida(estado_herida)
+
         # 1b. Fiebre en código y en este mismo turno, en sus dos variantes.
         #     Por la vía de la extracción ambas llegarían un turno tarde.
         #     - Cifra dicha en voz alta: decide el semáforo YA. "Tuve 38" seguido
@@ -620,8 +640,37 @@ class Conversacion:
         #     Un tercero que se presenta recibe su acuse: su relato vale, y las
         #     alarmas ya barrieron su texto igual que el del paciente.
         prefijo = ""
+        # Un saludo se responde con un saludo, y una aclaración repitiendo la
+        # pregunta. Ninguno de los dos es la respuesta clínica, así que no se
+        # evalúan como tal: en llamada real, "¡Buenos días!" recibió "Disculpe,
+        # no le entendí la temperatura", y "¿qué es lo que se llama?" recibió el
+        # discurso de "no está en mi documentación".
+        if preguntas.es_saludo_puro(texto_paciente) or preguntas.es_aclaracion(texto_paciente):
+            with self._lock:
+                foco_vigente = self.estado.foco_actual or self.estado.siguiente_foco()
+            saludo = "Buenos días. " if preguntas.es_saludo_puro(texto_paciente) else ""
+            if foco_vigente is None:
+                texto = f"{saludo}¿Hay algo más que quiera contarme?"
+            elif self.estado.cuadro.falta_el_numero_de_fiebre and foco_vigente is Foco.FIEBRE:
+                texto = f"{saludo}Le repito: {PEDIDOS_DE_DATO[Foco.FIEBRE]}"
+            else:
+                texto = f"{saludo}Le repito la pregunta: {_elegir(PREGUNTAS[foco_vigente])}"
+            self.estado.transcripcion.append(("agente", texto))
+            return RespuestaTurno(
+                texto=texto,
+                decision=decision,
+                escala=decision.escala,
+                cierra=False,
+                foco=foco_vigente,
+                alarmas_detectadas=detectadas,
+            )
+
         if preguntas.habla_un_tercero(texto_paciente):
             prefijo = ACUSE_TERCERO + " "
+        elif preguntas.es_aclaracion(texto_paciente):
+            # Ya se manejó arriba; acá solo se evita que caiga al consultor del
+            # corpus, que respondería "no está en mi documentación".
+            prefijo = ""
         elif preguntas.es_verificacion(texto_paciente):
             # "¿Anotaste el número?" se responde desde el estado del sistema, no
             # desde el corpus: al paciente que quiere saber si lo escucharon,
@@ -665,6 +714,7 @@ class Conversacion:
             and not prefijo
             and not prefijo_cifra  # ya se abandonó la cifra: no reintentar encima
             and cifra_dicha is None  # una cifra captada ES el dato
+            and estado_herida is None  # un estado de herida detectado también
             and not _aporta_dato(texto_paciente, foco_respondido_previo)
             and foco_respondido_previo not in self.estado.reintentados
         ):

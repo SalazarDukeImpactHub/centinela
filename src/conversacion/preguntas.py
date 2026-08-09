@@ -75,6 +75,44 @@ def contiene_pregunta(texto: str) -> bool:
     return es_verificacion(texto)
 
 
+# Saludos y cortesías puras. Caso real: el paciente abrió con "¡Buenos días!"
+# y recibió "Disculpe, no le entendí la temperatura" — el saludo se evaluó como
+# si fuera la respuesta clínica. A un saludo se responde con un saludo.
+_SALUDOS = re.compile(
+    r"^\s*(buenos dias|buenas tardes|buenas noches|buenas|hola|alo|"
+    r"muy buenas|que tal|como esta|como le va)[\s.,!¡¿?]*$"
+)
+
+# Pedidos de aclaración: el paciente no entendió LA PREGUNTA. Caso real: "¿Qué
+# es lo que se llama?" se buscó en el corpus clínico y recibió el discurso de
+# "no está en mi documentación" — a alguien que solo pedía que le repitieran.
+_ACLARACIONES = re.compile(
+    r"^\s*(como|como asi|que|que cosa|que es eso|que es lo que|no entiendo|"
+    r"no entendi|no le entendi|me repite|repita|otra vez|perdon|"
+    r"como dice|como dijo|que me pregunto|que es lo que se llama)[\s.,!¡¿?]*$"
+)
+
+
+def _sin_signos_iniciales(texto: str) -> str:
+    """Quita los signos de apertura del español, que Whisper siempre agrega.
+
+    Los patrones de saludo y aclaración están anclados al inicio de la frase, y
+    un "¡" o un "¿" delante los rompía: "¡Buenos días!" no coincidía con
+    "buenos dias" y el saludo se evaluaba como respuesta clínica.
+    """
+    return _normalizar(texto).lstrip("¡¿!? \t")
+
+
+def es_saludo_puro(texto: str) -> bool:
+    """El turno es SOLO un saludo, sin contenido clínico."""
+    return bool(_SALUDOS.match(_sin_signos_iniciales(texto)))
+
+
+def es_aclaracion(texto: str) -> bool:
+    """El paciente pide que le repitan o expliquen la pregunta."""
+    return bool(_ACLARACIONES.match(_sin_signos_iniciales(texto)))
+
+
 def es_verificacion(texto: str) -> bool:
     """El paciente pregunta si se registró lo que dijo: "¿anotaste el número?".
 
