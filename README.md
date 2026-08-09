@@ -15,9 +15,9 @@
 ![Whisper](https://img.shields.io/badge/Whisper%20V3-es--CO-F55036?style=for-the-badge&logo=openai&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-compose%20up-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
-![Recall](https://img.shields.io/badge/🔴%20recall%20casos%20rojo-12%2F12-critical?style=for-the-badge)
-![Latencia](https://img.shields.io/badge/⚡%20latencia%20P50-4.2s-blue?style=for-the-badge)
-![Tests](https://img.shields.io/badge/✅%20tests-221-brightgreen?style=for-the-badge)
+![Recall](https://img.shields.io/badge/🔴%20recall%20casos%20rojo-12%2F12%20motor%20·%2010%2F12%20E2E-critical?style=for-the-badge)
+![Latencia](https://img.shields.io/badge/⚡%20latencia%20P50-5.1s-blue?style=for-the-badge)
+![Tests](https://img.shields.io/badge/✅%20tests-284-brightgreen?style=for-the-badge)
 
 **Tech Sphere Challenge 2026** · Source Meridian × AI Thinkers Medellín
 
@@ -52,7 +52,7 @@ flowchart TD
     C -->|🔴 alarma| E[🚨 Alerta al equipo<br/>y la valoración CONTINÚA]
     C -->|siguiente pregunta| D[Piper TTS<br/>primer audio ~0,4 s]
     E --> D
-    D --> F([🔊 El agente responde<br/>latencia percibida P50: 4,2 s])
+    D --> F([🔊 El agente responde<br/>latencia percibida P50: 5,1 s])
     C -.->|segundo plano| M[llama3.2:3b local<br/>extrae detalle · ~17 s<br/>validado contra el texto crudo]
     M -.-> C
     C <--> R[(📚 ChromaDB<br/>6.512 fragmentos con cita<br/>a archivo y página)]
@@ -215,21 +215,27 @@ Todo número de esta sección se regenera desde los registros reales con:
 python scripts/metricas_readme.py
 ```
 
-**Latencia** (fin de habla del paciente → inicio de audio del agente), sobre 25
-turnos de voz reales en el hardware de referencia (Intel i3-1005G1, 2 núcleos,
-sin GPU):
+**Latencia** (fin de habla del paciente → inicio de audio del agente), medida
+**dentro de los contenedores** —que es como lo va a correr el jurado— en el
+hardware de referencia (Intel i3-1005G1, 2 núcleos, sin GPU), sobre turnos de
+voz reales sin ninguna otra carga compitiendo:
 
 <div align="center">
 
-| P50 | P95 |
-|:---:|:---:|
-| **4.196 ms** | **10.620 ms** |
+| Mínimo | **P50** | Máximo |
+|:---:|:---:|:---:|
+| 2.406 ms | **5.131 ms** | 12.713 ms |
 
 </div>
 
-El peor turno registrado (58,7 s) ocurrió cuando la extracción acaparaba los 4
-hilos lógicos; se corrigió con `num_thread=2` y el turno equivalente midió
-6,8 s. El registro conserva el caso: **los números malos también son evidencia.**
+El máximo corresponde al **primer turno de una llamada con el modelo frío**; a
+partir del segundo, los turnos se estabilizan entre 2,4 y 6 s.
+
+Dos números peores quedan en los registros históricos y se conservan a
+propósito: **58,7 s** cuando la extracción acaparaba los 4 hilos lógicos
+—corregido con `num_thread=2`— y un P95 de 19 s medido mientras Docker
+construía la imagen en paralelo. **Los números malos también son evidencia**, y
+un registro que solo guarda los buenos no sirve para auditar nada.
 
 **Consumo:** ~786 tokens de entrada / ~39 de salida por turno con extracción ·
 1 invocación al modelo por turno (en segundo plano, 0 en el camino crítico) ·
@@ -251,6 +257,17 @@ Whisper en Groq (0,111 USD/h de audio). El desglose viaja en cada
 
 Calibrado a propósito: un falso positivo cuesta una llamada de verificación; un
 falso negativo en posoperatorio es riesgo clínico.
+
+---
+
+## 📐 Diagrama e informe
+
+- [`docs/arquitectura.md`](docs/arquitectura.md) — arquitectura, flujo de
+  decisión y la compuerta capa por capa. **Cada caja nombra un archivo real**:
+  13 de 13 verificados contra el código.
+- [`docs/informe-final.md`](docs/informe-final.md) — declaración de modelo,
+  la decisión técnica más relevante con sus siete fallas medidas, alternativas
+  descartadas, riesgos y gobernanza.
 
 ---
 
