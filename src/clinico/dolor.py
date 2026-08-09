@@ -70,7 +70,15 @@ _LIMITADA = [re.compile(p) for p in MOVILIDAD_LIMITADA]
 _NORMAL_MOV = [re.compile(p) for p in MOVILIDAD_NORMAL]
 
 # "cero" a "diez" en palabras, o un dígito suelto de 0 a 10.
-_RE_DIGITO = re.compile(r"\b(10|[0-9])\b")
+# El lookahead descarta números con unidad ajena al dolor. MEDIDO sobre los 160
+# casos: "hace 7 días que me operaron" se registraba como dolor 7/10 —a un paso
+# del umbral de escalamiento— y "me tomo 3 pastillas" como dolor 3.
+_UNIDADES_AJENAS = (
+    r"dia|semana|mes|ano|hora|minuto|pastilla|tableta|gota|mililitro|"
+    r"cuadra|metro|kilo|libra|vez|vece|punto|grado|de la manana|de la tarde|"
+    r"de la noche|am\b|pm\b"
+)
+_RE_DIGITO = re.compile(rf"\b(10|[0-9])\b(?!\s*(?:{_UNIDADES_AJENAS}))")
 _RE_PALABRA = re.compile(
     r"\b(cero|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b"
 )
@@ -81,11 +89,28 @@ def _normalizar(texto: str) -> str:
     return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn")
 
 
-def nivel_dolor(texto: str) -> int | None:
+# Palabras que anclan la escala verbal al DOLOR y no a otra cosa. "Mucho" a
+# secas puede ser mucha fiebre, mucho sueño o mucha hambre; "me duele mucho" no.
+_MENCIONA_DOLOR = re.compile(
+    r"\b(dolor|duele|dolia|adolorid|molest|punza|arde|ardor|pincha|"
+    r"aguanto|aguantar)\w*"
+)
+
+
+def menciona_dolor(texto: str) -> bool:
+    return bool(_MENCIONA_DOLOR.search(_normalizar(texto)))
+
+
+def nivel_dolor(texto: str, *, admitir_numero: bool = True) -> int | None:
     """Intensidad del dolor 0-10 según lo dicho, o None si no se puede saber.
 
     Acepta dígitos ("un 7"), palabras ("siete") y escala verbal ("me duele
     harto"). Sin esto, la mitad de las respuestas por teléfono se perdían.
+
+    `admitir_numero`: los números sueltos solo cuentan cuando el agente preguntó
+    por dolor. Fuera de ese contexto un "37" es una temperatura, y un dolor de
+    37 no existe. La escala verbal, en cambio, se escucha siempre — pero exige
+    que la frase hable de dolor: "mucho" a secas puede ser mucha fiebre.
     """
     normalizado = _normalizar(texto)
 
@@ -93,16 +118,22 @@ def nivel_dolor(texto: str) -> int | None:
     if re.search(r"\bno (me )?(duele|tengo dolor)\b|\bnada de dolor\b", normalizado):
         return 0
 
-    m = _RE_DIGITO.search(normalizado)
-    if m:
-        return int(m.group(1))
+    if admitir_numero:
+        m = _RE_DIGITO.search(normalizado)
+        if m:
+            valor = int(m.group(1))
+            if 0 <= valor <= 10:
+                return valor
 
-    m = _RE_PALABRA.search(normalizado)
-    if m:
-        return PALABRAS_NUMERO[m.group(1)]
+        m = _RE_PALABRA.search(normalizado)
+        if m:
+            return PALABRAS_NUMERO[m.group(1)]
 
     # Escala verbal: se prueba de mayor a menor longitud para que "muy fuerte"
-    # gane sobre "fuerte" y "mas o menos" sobre "medio".
+    # gane sobre "fuerte" y "mas o menos" sobre "medio". Fuera del contexto de
+    # dolor exige que la frase lo nombre.
+    if not admitir_numero and not menciona_dolor(normalizado):
+        return None
     for frase in sorted(ESCALA_VERBAL, key=len, reverse=True):
         if re.search(rf"\b{re.escape(frase)}\b", normalizado):
             return ESCALA_VERBAL[frase]

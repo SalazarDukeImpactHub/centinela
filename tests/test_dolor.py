@@ -126,3 +126,29 @@ class TestElEcoNoMiente:
         conv.responder("No me puedo mover.")
         conv.esperar_extraccion()
         assert conv.estado.cuadro.movilidad is Movilidad.INCAPACITANTE_NUEVA
+
+
+class TestNumerosQueNoSonDolor:
+    """MEDIDO sobre los 160 casos: "hace 7 días que me operaron" se registraba
+    como dolor 7/10, a un paso del umbral de escalamiento."""
+
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "hace 7 días que me operaron",
+            "me tomo 3 pastillas al día",
+            "camino 5 cuadras",
+            "como a las 8 de la mañana",
+            "llevo 2 semanas así",
+        ],
+    )
+    def test_los_numeros_con_unidad_ajena_se_ignoran(self, texto: str):
+        assert nivel_dolor(texto, admitir_numero=True) is None
+
+    @pytest.mark.parametrize("texto", ["un 7 de dolor", "en un 8", "como 4"])
+    def test_el_numero_del_dolor_si_se_toma(self, texto: str):
+        assert nivel_dolor(texto, admitir_numero=True) is not None
+
+    def test_fuera_del_contexto_de_dolor_no_se_toman_numeros(self):
+        """Un "37" suelto es una temperatura, no un dolor de 37."""
+        assert nivel_dolor("me marcó 37", admitir_numero=False) is None

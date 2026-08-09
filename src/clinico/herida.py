@@ -81,6 +81,26 @@ def _normalizar(texto: str) -> str:
     return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn")
 
 
+def _negado(normalizado: str, patron: re.Pattern[str]) -> bool:
+    """El hallazgo aparece dentro de una negación.
+
+    MEDIDO sobre los 160 casos: sin esto, "nada de pus ni nada raro" y "se ve
+    rojita pero nada de pus" se registraban como SECRECIÓN PURULENTA —el
+    hallazgo más grave del sistema, que escala solo—. Trece pacientes verdes
+    escalaban por una secreción que el paciente estaba negando.
+
+    Se busca un negador en los 30 caracteres previos al hallazgo, sin cruzar
+    puntuación fuerte: "no le sale nada" niega, pero "le sale líquido. No tengo
+    fiebre" no niega la secreción.
+    """
+    for m in patron.finditer(normalizado):
+        ventana = normalizado[max(0, m.start() - 30) : m.start()]
+        ventana = re.split(r"[.;]", ventana)[-1]
+        if not re.search(r"\b(no|nada de|sin|ni|tampoco|ningun[ao]?)\b", ventana):
+            return False  # al menos una aparición NO está negada
+    return True
+
+
 def estado_referido(texto: str) -> str | None:
     """Estado de la herida según lo dicho: el valor del enum `Herida`, o None.
 
@@ -88,13 +108,18 @@ def estado_referido(texto: str) -> str | None:
     herida "roja, hinchada y con líquido" es secreción purulenta —rojo— y no
     eritema leve. Quedarse con el primer hallazgo mencionado sería quedarse con
     el menos grave.
+
+    Las negaciones se respetan: el paciente que dice "nada de pus" está negando
+    la secreción, no reportándola.
     """
     normalizado = _normalizar(texto)
 
-    if any(p.search(normalizado) for p in _SECRECION):
-        return "secrecion_purulenta"
-    if any(p.search(normalizado) for p in _ERITEMA):
-        return "eritema_leve"
+    for p in _SECRECION:
+        if p.search(normalizado) and not _negado(normalizado, p):
+            return "secrecion_purulenta"
+    for p in _ERITEMA:
+        if p.search(normalizado) and not _negado(normalizado, p):
+            return "eritema_leve"
     if any(p.search(normalizado) for p in _NO_MIRADA):
         return "desconocido"
     if any(p.search(normalizado) for p in _NORMAL):

@@ -30,6 +30,13 @@ MENCIONES_FIEBRE = [
     r"\bdestemplad[oa]\b",
     r"\bcuerpo caliente\b",
     r"\bme senti caliente\b",
+    # "Acalorada" es como muchas pacientes nombran la fiebre sin usar la
+    # palabra. Caso real del dataset: "he estado como acalorada un poco" con
+    # 38.9 °C de temperatura real — se perdía entero.
+    r"\bacalorad[oa]\b",
+    r"\bsofocad[oa]\b",
+    r"\bhirviendo\b",
+    r"\bcaliente por dentro\b",
     r"\bardiendo\b",
     r"\btirit",
     r"\bsudor(es|acion)?\s+(en la noche|nocturn)",
@@ -218,6 +225,15 @@ def extraer_cifra(texto: str, *, contexto_fiebre: bool = False) -> float | None:
 
     # "38 y medio" en dígitos: el regex principal tomaría el 38 y perdería el medio.
     m = re.search(r"\b(3[1-9]|4[0-2])\s*y\s*medio\b", normalizado)
+    if m:
+        return float(m.group(1)) + 0.5
+
+    # "37 y algo", "38 y pico", "37 y monedas": el paciente sabe el entero y no
+    # el decimal. Tomarlo como el entero exacto es quedarse con el mejor caso, y
+    # en el caso real del dataset esa lectura convirtió un 37.9 (amarillo) en un
+    # 37.0 (verde). Se asume el punto medio, que es la lectura cautelosa.
+    m = re.search(r"\b(3[1-9]|4[0-2])\s*y\s*(algo|pico|monedas|tantos|puchito)\b",
+                  normalizado)
     if m:
         return float(m.group(1)) + 0.5
 

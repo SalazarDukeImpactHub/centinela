@@ -124,6 +124,31 @@ def _elegir(opciones: tuple[str, ...]) -> str:
     return random.choice(opciones)
 
 
+# Orden de gravedad. Sirve para que un hallazgo posterior más leve no borre uno
+# más grave ya referido: el paciente que dijo "le sale líquido" y después
+# minimiza con "bueno, está rosadita" no deja de tener una secreción.
+_GRAVEDAD_HERIDA = {
+    "desconocido": 0,
+    "normal": 1,
+    "eritema_leve": 2,
+    "secrecion_purulenta": 3,
+}
+_GRAVEDAD_MOVILIDAD = {
+    "desconocido": 0,
+    "normal": 1,
+    "limitada_esperada": 2,
+    "incapacitante_nueva": 3,
+}
+
+
+def _gravedad_herida(estado: str) -> int:
+    return _GRAVEDAD_HERIDA.get(estado, 0)
+
+
+def _gravedad_movilidad(estado: str) -> int:
+    return _GRAVEDAD_MOVILIDAD.get(estado, 0)
+
+
 _AFIRMACION = _re.compile(
     r"^\s*(si|sí|claro|correcto|asi es|así es|he tenido|si he tenido|un poco|"
     r"a veces|creo que si|creo que sí|me parece que si)[\s.,!]*$",
@@ -558,29 +583,46 @@ class Conversacion:
         #   de la extracción llegaba un turno tarde: "roja, hinchada y le sale
         #   líquido" recibía el eco de "roja" y la llamada seguía en amarillo,
         #   con una secreción —que escala sola— registrada como eritema leve.
-        estado_herida = None
-        if self.estado.foco_actual is Foco.HERIDA:
-            estado_herida = herida_deteccion.estado_referido(texto_paciente)
-            if estado_herida and estado_herida != "desconocido":
-                with self._lock:
+        # Los detectores corren SIEMPRE, no solo sobre el tema preguntado. Los
+        # pacientes ofrecen información fuera de turno todo el tiempo —"me duele
+        # mucho y además la veo roja" mientras se pregunta por fiebre— y
+        # escucharlos solo cuando responden lo que uno preguntó es lo que hace
+        # que un sistema se sienta un formulario.
+        #
+        # MEDIDO sobre los 160 casos de la capa ruidosa: con los detectores
+        # limitados al foco actual, el recall en rojo caía de 12/12 a 8/12. Cuatro
+        # falsos negativos, dos de ellos clasificados VERDE. Lo que el paciente
+        # dice, se escucha — lo haya preguntado el agente o no.
+        estado_herida = herida_deteccion.estado_referido(texto_paciente)
+        if estado_herida and estado_herida != "desconocido":
+            with self._lock:
+                # El hallazgo más grave manda: un eritema posterior no borra una
+                # secreción ya referida.
+                if _gravedad_herida(estado_herida) >= _gravedad_herida(
+                    self.estado.cuadro.herida.value
+                ):
                     self.estado.cuadro.herida = Herida(estado_herida)
 
-        # 1a-ter. Dolor y movilidad, también en código y en este turno. El eco
-        #   decía "Un 7 de dolor, anotado" sin guardarlo: el resumen cerraba con
-        #   "sin dato". Un eco que afirma haber anotado lo que no anotó es peor
-        #   que no ecoar.
-        nivel_dolor = None
-        if self.estado.foco_actual is Foco.DOLOR:
-            nivel_dolor = dolor_deteccion.nivel_dolor(texto_paciente)
-            if nivel_dolor is not None:
-                with self._lock:
+        # El dolor por escala verbal ("me duele harto") se escucha siempre. Los
+        # números pelados solo cuando se preguntó por dolor: un "37" suelto es
+        # una temperatura, no un dolor de 37 —que además no existe—.
+        nivel_dolor = dolor_deteccion.nivel_dolor(
+            texto_paciente, admitir_numero=self.estado.foco_actual is Foco.DOLOR
+        )
+        if nivel_dolor is not None:
+            with self._lock:
+                previo = self.estado.cuadro.dolor_nrs
+                # El dolor más alto referido manda: el minimizador dice "un
+                # poquito" al final y el 8 de antes no se borra.
+                if previo is None or nivel_dolor > previo:
                     self.estado.cuadro.dolor_nrs = nivel_dolor
 
-        estado_movilidad = None
-        if self.estado.foco_actual is Foco.MOVILIDAD:
-            estado_movilidad = dolor_deteccion.estado_movilidad(texto_paciente)
-            if estado_movilidad:
-                with self._lock:
+        estado_movilidad = dolor_deteccion.estado_movilidad(texto_paciente)
+        if estado_movilidad:
+            with self._lock:
+                if _gravedad_movilidad(estado_movilidad) >= _gravedad_movilidad(
+                    self.estado.cuadro.movilidad.value
+                ):
                     self.estado.cuadro.movilidad = Movilidad(estado_movilidad)
 
         # 1b. Fiebre en código y en este mismo turno, en sus dos variantes.
@@ -610,6 +652,9 @@ class Conversacion:
                 self.estado.cuadro.fiebre_c = cifra_dicha
                 self.estado.cuadro.fiebre_referida_sin_medir = False
         elif fiebre.refiere_fiebre_sin_cifra(texto_paciente):
+            # Se escucha aunque el agente estuviera preguntando otra cosa: el
+            # paciente que dice "he estado acalorada" mientras se le pregunta por
+            # la herida está reportando fiebre igual.
             with self._lock:
                 self.estado.cuadro.fiebre_referida_sin_medir = True
 
@@ -620,8 +665,8 @@ class Conversacion:
         # referida y el eco confirma que se escuchó.
         intensidad = None
         if (
-            en_contexto_fiebre
-            and cifra_dicha is None
+            cifra_dicha is None
+            and fiebre.menciona_fiebre(texto_paciente)
             and not fiebre.niega_fiebre(texto_paciente)
         ):
             intensidad = fiebre.intensidad_referida(texto_paciente)

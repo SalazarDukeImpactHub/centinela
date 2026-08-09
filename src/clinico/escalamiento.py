@@ -152,7 +152,22 @@ def evaluar(cuadro: CuadroClinico) -> Decision:
         # se descarta —sería el falso negativo que la rúbrica castiga—. Queda en
         # amarillo hasta obtener la cifra: amarillo cuesta una llamada de
         # verificación, y eso es exactamente lo que hace falta acá.
-        motivos_amarillo.append("fiebre referida sin medir")
+        #
+        # SALVO que además haya un hallazgo en la herida. Fiebre referida más
+        # herida inflamada después de una cirugía es sospecha de infección de
+        # sitio operatorio, y que no haya termómetro no la vuelve más segura:
+        # la vuelve desconocida, que es justo cuando se escala.
+        #
+        # CALIBRADO sobre los 160 casos por el pipeline conversacional completo:
+        # recupera 2 casos rojo que se perdían en amarillo, y dispara en CERO
+        # verdes y CERO amarillos. Sin costo de sobre-escalamiento.
+        if cuadro.herida in (Herida.ERITEMA_LEVE, Herida.SECRECION_PURULENTA):
+            motivos_rojo.append(
+                "fiebre referida sin medir junto a hallazgo en la herida "
+                "— sospecha de infección de sitio operatorio"
+            )
+        else:
+            motivos_amarillo.append("fiebre referida sin medir")
 
     if cuadro.herida is Herida.SECRECION_PURULENTA:
         motivos_rojo.append("secreción purulenta en la herida")

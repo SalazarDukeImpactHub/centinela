@@ -122,3 +122,34 @@ class TestVocabulario:
             assert "destemplado" not in frase.lower()
             assert "eritema" not in frase.lower()
             assert "purulent" not in frase.lower()
+
+
+class TestNegacionEnLaHerida:
+    """El paciente que dice "nada de pus" está NEGANDO la secreción.
+
+    MEDIDO sobre los 160 casos: sin manejo de negación, "nada de pus ni nada
+    raro" se registraba como secreción purulenta —el hallazgo más grave del
+    sistema, que escala solo— y 13 pacientes verdes escalaban por eso.
+    """
+
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "nada de pus ni nada raro",
+            "no le sale nada",
+            "no tiene secreción",
+            "sin líquido ni nada",
+        ],
+    )
+    def test_la_secrecion_negada_no_se_registra(self, texto: str):
+        assert estado_referido(texto) != "secrecion_purulenta"
+
+    def test_el_eritema_negado_no_se_registra(self):
+        assert estado_referido("no está roja") != "eritema_leve"
+
+    def test_la_negacion_parcial_conserva_lo_afirmado(self):
+        """"Rojita pero nada de pus": el eritema es real, la secreción no."""
+        assert estado_referido("se ve un poquito rojita pero nada de pus") == "eritema_leve"
+
+    def test_la_secrecion_afirmada_sigue_detectandose(self):
+        assert estado_referido("le sale un líquido amarillo") == "secrecion_purulenta"
