@@ -24,6 +24,14 @@ import unicodedata
 SECRECION = [
     r"\bsale\b.{0,20}\b(liquido|algo|pus|materia|agua|sangre|secrecion)",
     r"\b(liquido|pus|materia|secrecion)\b.{0,20}\bsal(e|iendo)",
+    # El paciente no siempre usa un verbo. En llamada real dijo "hinchada y con
+    # líquido" y se registró como ERITEMA LEVE: el detector exigía la palabra
+    # "sale" y se quedó con el hallazgo menos grave, degradando una secreción
+    # —que escala sola— a amarillo. La sola presencia de líquido o secreción
+    # nombrada sobre la herida ya es el hallazgo.
+    r"\bcon (liquido|secrecion|pus|materia|algo)\b",
+    r"\btiene\b.{0,15}\b(liquido|secrecion|pus|materia)\b",
+    r"\b(liquido|secrecion)\b.{0,15}\b(amarill|verdos|blanc|espes|feo|raro)",
     r"\bbotando\b",
     r"\bsupura",
     r"\bpus\b",

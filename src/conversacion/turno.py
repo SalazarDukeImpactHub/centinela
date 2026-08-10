@@ -149,6 +149,30 @@ def _gravedad_movilidad(estado: str) -> int:
     return _GRAVEDAD_MOVILIDAD.get(estado, 0)
 
 
+# Temas que el paciente trae por su cuenta: cosas del posoperatorio que no
+# forman parte del cuestionario clínico pero que le preocupan de verdad.
+_INQUIETUD = _re.compile(
+    r"\b(drenaje|dren|sonda|cateter|punto|sutura|grapa|vendaje|gasa|aposito|"
+    r"cita|control|resultado|examen|biopsia|incapacidad|licencia|medicament|"
+    r"pastilla|receta|formula|eps|autorizacion|orden)\w*"
+)
+
+
+def _es_inquietud(texto: str, foco: Foco | None) -> bool:
+    """El paciente habla de algo que el cuestionario no cubre.
+
+    Se exige una frase con contenido —no un monosílabo— y que el tema no sea
+    el que se está preguntando: si se pregunta por la herida y menciona la
+    gasa, eso es la respuesta, no una inquietud aparte.
+    """
+    plano = _sin_tildes(texto)
+    if len(plano.split()) < 3:
+        return False
+    if foco is Foco.HERIDA and _re.search(r"vendaje|gasa|aposito|punto|sutura", plano):
+        return False
+    return bool(_INQUIETUD.search(plano))
+
+
 _AFIRMACION = _re.compile(
     r"^\s*(si|sí|claro|correcto|asi es|así es|he tenido|si he tenido|un poco|"
     r"a veces|creo que si|creo que sí|me parece que si)[\s.,!]*$",
@@ -431,6 +455,13 @@ class EstadoLlamada:
     foco_actual: Foco | None = None
     cerrada: bool = False
     transcripcion: list[tuple[str, str]] = field(default_factory=list)
+    # Lo que el paciente trae por su cuenta y no responde a ninguna pregunta.
+    #
+    # De una llamada real: dijo "no me quitan el drenaje" al empezar y lo repitió
+    # al despedirse. Era su preocupación principal y no quedó en ninguna parte
+    # del resumen. El agente conduce el cuestionario, pero el paciente tiene su
+    # propia agenda — y quien reciba la alerta necesita saberla.
+    inquietudes: list[str] = field(default_factory=list)
 
     def siguiente_foco(self) -> Foco | None:
         for foco in ORDEN_FOCOS:
@@ -576,6 +607,15 @@ class Conversacion:
         if marcadores:
             with self._lock:
                 self.estado.cuadro.marcadores_minimizacion += marcadores
+
+        # Inquietud propia: el paciente trae un tema que nadie le preguntó.
+        # Se registra tal cual lo dijo, sin interpretarlo, para que el equipo
+        # que reciba la alerta lea sus palabras y no un resumen de ellas.
+        if _es_inquietud(texto_paciente, self.estado.foco_actual):
+            with self._lock:
+                dicho = texto_paciente.strip()
+                if dicho not in self.estado.inquietudes:
+                    self.estado.inquietudes.append(dicho)
 
         detectadas = alarmas.detectar(texto_paciente)
         if detectadas:
@@ -929,6 +969,13 @@ class Conversacion:
         else:
             texto = CIERRE_VERDE
 
+        if self.estado.inquietudes:
+            # Se nombra lo que el paciente trajo: preguntó por su cuenta y el
+            # cierre debe decirle que quedó anotado, no ignorarlo.
+            texto = (
+                "Y lo que me comentó, que no era parte de mis preguntas, también "
+                f"queda anotado para el equipo. {texto}"
+            )
         self.estado.transcripcion.append(("agente", texto))
         return RespuestaTurno(
             texto=texto, decision=decision, escala=decision.escala, cierra=True

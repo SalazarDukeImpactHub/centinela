@@ -153,3 +153,77 @@ class TestNegacionEnLaHerida:
 
     def test_la_secrecion_afirmada_sigue_detectandose(self):
         assert estado_referido("le sale un líquido amarillo") == "secrecion_purulenta"
+
+
+class TestSecrecionSinVerbo:
+    """El paciente no siempre usa un verbo para nombrar la secreción.
+
+    De una llamada real: dijo "hinchada y con líquido" y se registró como
+    ERITEMA LEVE. El detector exigía la palabra "sale" y se quedó con el
+    hallazgo menos grave, degradando una secreción —que escala sola— a amarillo.
+    """
+
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "Hinchada y con líquido",
+            "con líquido",
+            "roja y con secreción",
+            "tiene líquido",
+            "tiene secreción",
+            "líquido amarillo",
+        ],
+    )
+    def test_la_secrecion_nombrada_sin_verbo_se_detecta(self, texto: str):
+        assert estado_referido(texto) == "secrecion_purulenta"
+
+    def test_la_secrecion_escala_aunque_venga_con_hinchazon(self):
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="breast_cancer"))
+        conv.abrir()
+        conv.responder("no he tenido fiebre")
+        conv.esperar_extraccion()
+        r = conv.responder("Hinchada y con líquido.")
+        assert conv.estado.cuadro.herida is Herida.SECRECION_PURULENTA
+        assert r.decision.semaforo is Semaforo.ROJO
+
+
+class TestInquietudesDelPaciente:
+    """El paciente tiene su propia agenda y hay que registrarla.
+
+    De una llamada real: dijo "no me quitan el drenaje" al empezar y lo repitió
+    al despedirse. Era su preocupación principal y no quedó en ninguna parte.
+    """
+
+    def test_registra_lo_que_el_paciente_trae_por_su_cuenta(self):
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="breast_cancer"))
+        conv.abrir()
+        conv.responder("No me quitan el drenaje.")
+        conv.esperar_extraccion()
+        assert any("drenaje" in i for i in conv.estado.inquietudes)
+
+    def test_no_duplica_la_misma_inquietud(self):
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="breast_cancer"))
+        conv.abrir()
+        for _ in range(3):
+            conv.responder("No me quitan el drenaje.")
+            conv.esperar_extraccion()
+        assert len(conv.estado.inquietudes) == 1
+
+    def test_una_respuesta_clinica_no_es_inquietud(self):
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="breast_cancer"))
+        conv.abrir()
+        conv.responder("no he tenido nada de fiebre")
+        conv.esperar_extraccion()
+        assert conv.estado.inquietudes == []
+
+    def test_el_cierre_reconoce_lo_que_trajo_el_paciente(self):
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="breast_cancer"))
+        conv.abrir()
+        conv.responder("No me quitan el drenaje.")
+        conv.esperar_extraccion()
+        for respuesta in ["no he tenido fiebre", "la veo bien", "un 2", "camino bien", "nada más"]:
+            r = conv.responder(respuesta)
+            conv.esperar_extraccion()
+            if r.cierra:
+                break
+        assert "no era parte de mis preguntas" in r.texto

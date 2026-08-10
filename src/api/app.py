@@ -643,6 +643,9 @@ async def colgar(llamada_id: str) -> JSONResponse:
             "sintomas_alarma": estado.cuadro.sintomas_alarma,
         },
         "sin_preguntar": estado.cuadro.campos_faltantes,
+        # Lo que el paciente trajo por su cuenta, en sus palabras. Quien reciba
+        # la alerta necesita saber qué le preocupaba de verdad.
+        "inquietudes_del_paciente": estado.inquietudes,
         "transcripcion": [
             {"quien": quien, "texto": texto} for quien, texto in estado.transcripcion
         ],
