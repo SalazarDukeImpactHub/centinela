@@ -99,24 +99,82 @@ respuesta. La latencia percibida bajó de **19 s a 4,2 s de P50**.
 
 | Riesgo | Mitigación |
 |---|---|
-| El paciente minimizador subreporta | Un verde sin campos preguntados **no es un alta**: el agente sigue indagando. Aun así, 2 de 12 rojos se pierden en amarillo cuando el paciente dice *«un poquito»* con dolor real de 9 |
+| El paciente minimizador subreporta | **Resuelto y medido.** Un verde sin campos preguntados no es un alta, y además se detecta la minimización sistemática: ver §2.4 |
 | Whisper transcribe mal las cifras | Rango fisiológico 30–43 °C, formas compuestas (*«30 y 5»*), y tope de dos reintentos antes de seguir |
 | Inyección de prompt vía documentos subidos | La consola de G5 es un canal al prompt: el texto se sanea y se delimita como datos. La decisión clínica, además, no es inyectable |
 | Credencial de Groq en repositorio público | Exigido por G2. Clave desechable, revocación el 18 de agosto |
 | Corpus incompleto en la evaluación | Es lo esperado (§4). El agente declara el límite y la consola de carga en caliente es el mecanismo previsto |
 
-### Qué cambiaría con dos semanas más
+### 2.4 Mejoras posteriores al primer cierre — todas medidas
 
-1. **Reranker cruzado sobre el RAG.** La compuerta actual funciona con capas
-   baratas porque un reranker no entra en el presupuesto de latencia de esta
-   máquina. Con más margen mejoraría la precisión de las citas.
-2. **Detección del minimizador.** Los 2 falsos negativos que quedan son
-   pacientes que subreportan sistemáticamente. El dataset marca ese estilo; un
-   modelo de confianza por paciente permitiría ponderar sus respuestas.
-3. **Traducción de consulta para el corpus bilingüe.** Documentado en
-   `docs/security/F2-revision-seguridad.md`: una pregunta coloquial en español
-   contra documentos en inglés queda bloqueada de más.
-4. **Barge-in.** Que el paciente pueda interrumpir al agente mientras habla.
+Las cuatro líneas que este informe listaba como trabajo futuro se atacaron. Tres
+se implementaron y una se descartó con el número que la descarta.
+
+**Detección del minimizador — implementada.** Se contaron los marcadores de
+minimización por llamada sobre los 160 casos:
+
+| etiqueta | marcadores (mediana) |
+|---|---|
+| verde | 2 |
+| amarillo | 3 |
+| **rojo** | **6** |
+
+El paciente que está PEOR es el que más resta importancia. Contraintuitivo hasta
+que uno lo piensa: quien tiene 9 de dolor y dice *«un poquito molesto, uno
+aguanta»* no informa mal — aguanta, que es otra cosa. La señal solo **pondera**
+hallazgos existentes y nunca crea uno: sobre un cuadro verde no hace nada, y así
+está fijado por test. Calibrada en 6 marcadores, **lleva el recall del pipeline
+conversacional completo a 12/12** al costo de 2 verdes adicionales escalados.
+
+**Puente bilingüe — implementado.** El corpus mezcla idiomas y 5 de 8 consultas
+legítimas quedaban bloqueadas: el agente decía «no lo sé» sobre material que sí
+tenía —29 fragmentos de colecistitis hablan de ducharse y *«¿cuándo me puedo
+bañar?»* se rechazaba—. Tres correcciones: diccionario clínico auditable en vez
+de traductor automático, consulta formulada en el registro del corpus (el
+término suelto recupera con 0,816 y enmarcado como terminología clínica con
+0,870), y recuperación ampliada de 15 a 40 candidatos porque los fragmentos
+correctos no entraban en la red angosta. **Resultado: 13/13**, sin costo de
+precisión — las seis consultas que deben bloquearse siguen bloqueadas.
+
+**Barge-in — implementado.** El paciente puede interrumpir al agente mientras
+habla, reusando la detección de voz de la escucha automática con un umbral más
+alto para distinguir su voz del eco del parlante.
+
+**Reranker cruzado — evaluado y descartado con el número que lo descarta.**
+Se midió con `scripts/experimento_reranker.py` sobre las mismas 13 consultas de
+calibración, usando el cross-encoder multilingüe más liviano disponible
+(`mmarco-mMiniLMv2-L12-H384-v1`) — es decir, el mejor caso posible de latencia:
+
+| | |
+|---|---|
+| Latencia media sobre 40 candidatos | **15.418 ms** (mín 788, máx 46.164) |
+| Sobre un turno de 5.131 ms | **+300 %** |
+| Carga del modelo al arrancar | 162 s |
+| Consultas legítimas que aprobaría | **0 de 7** |
+
+No se descartó solo por caro: **acierta peor**. Rechaza las siete consultas que
+el corpus sí responde, y le asigna 1,961 —el puntaje más alto de toda la
+tabla— a *«cuidados tras una amigdalectomía»*, que es exactamente la que hay que
+bloquear porque el corpus no cubre ese procedimiento.
+
+La razón es la misma que hizo funcionar el puente bilingüe: el reranker fue
+entrenado sobre pares pregunta-respuesta de búsqueda web, y este corpus son
+guías de práctica clínica que no responden preguntas — las declaran. Un modelo
+entrenado para otra tarea no mejora por ser más grande.
+
+**Conclusión:** la compuerta en capas, que cuesta ~50 ms y acierta 13/13, es
+mejor que un reranker que cuesta 15 s y acierta 5/13. El experimento queda en el
+repositorio para que la decisión sea verificable.
+
+### Qué cambiaría con más tiempo
+
+1. **Traducción completa del corpus**, no solo de la consulta. El diccionario
+   cubre el vocabulario posoperatorio, pero una pregunta muy fuera de ese
+   campo semántico seguiría sin puente.
+2. **Modelo de confianza por paciente** que aprenda del historial de sus
+   llamadas anteriores, no solo de la actual.
+3. **Barge-in con cancelación de eco real**, para bajar el umbral de
+   interrupción sin riesgo de que el agente se interrumpa a sí mismo.
 
 ---
 

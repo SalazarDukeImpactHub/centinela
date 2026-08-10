@@ -173,6 +173,7 @@ flowchart LR
 | Negación de hallazgos | código | *"nada de pus"* se registraba como **secreción purulenta** |
 | Dolor y movilidad | código | el eco decía *"un 7 anotado"* y el resumen cerraba *"sin dato"* |
 | Decisión de escalar | código | no se negocia con un prompt |
+| Minimización sistemática | código | el minimizador reporta verde con cuadro rojo; la señal está en CÓMO habla |
 
 **Resultado:** el modelo de lenguaje quedó reducido a lo que hace bien —entender
 cómo habla la gente— y ninguna de sus fallas puede llegar al registro clínico.
@@ -184,9 +185,10 @@ cómo habla la gente— y ninguna de sus fallas puede llegar al registro clínic
 | Qué | Cómo se comprueba | Resultado |
 |---|---|---|
 | Decisión clínica (motor aislado) | `pytest tests/test_escalamiento.py` | **12/12** en casos rojo |
-| Decisión clínica (pipeline completo) | `python scripts/banco_conversacional.py` | **10/12**, ninguno cae a verde |
+| Decisión clínica (pipeline completo) | `python scripts/banco_conversacional.py` | **12/12** |
 | Conocimiento vivo (G5) | `pytest tests/test_conocimiento_vivo.py` | alta · uso · baja · olvido |
 | Defensa contra inyección | `pytest tests/test_saneamiento.py` | 14 ataques bloqueados |
 | Dataset contra el kit | `pytest tests/test_dataset.py` | 20 afirmaciones verificadas |
 | Levantamiento (G2) | `docker compose up` | **6 min 07 s** de 15 |
-| Suite completa | `pytest tests/` | **284 pruebas** |
+| Suite completa | `pytest tests/` | **313 pruebas** |
+| Reranker cruzado (descartado) | `python scripts/experimento_reranker.py` | +300 % de latencia, 0/7 aciertos |

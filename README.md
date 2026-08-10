@@ -15,9 +15,9 @@
 ![Whisper](https://img.shields.io/badge/Whisper%20V3-es--CO-F55036?style=for-the-badge&logo=openai&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-compose%20up-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
-![Recall](https://img.shields.io/badge/🔴%20recall%20casos%20rojo-12%2F12%20motor%20·%2010%2F12%20E2E-critical?style=for-the-badge)
+![Recall](https://img.shields.io/badge/🔴%20recall%20casos%20rojo-12%2F12%20E2E-critical?style=for-the-badge)
 ![Latencia](https://img.shields.io/badge/⚡%20latencia%20P50-5.1s-blue?style=for-the-badge)
-![Tests](https://img.shields.io/badge/✅%20tests-284-brightgreen?style=for-the-badge)
+![Tests](https://img.shields.io/badge/✅%20tests-313-brightgreen?style=for-the-badge)
 
 **Tech Sphere Challenge 2026** · Source Meridian × AI Thinkers Medellín
 
@@ -251,7 +251,8 @@ Whisper en Groq (0,111 USD/h de audio). El desglose viaja en cada
 
 | Métrica | Resultado |
 |---|---|
-| 🔴 Recall en ROJO (12 casos) | **12/12 — cero falsos negativos** |
+| 🔴 Recall en ROJO — motor aislado | **12/12** |
+| 🔴 Recall en ROJO — pipeline conversacional completo | **12/12** |
 | 🟡 Amarillos degradados a verde | **0** |
 | 🟢 Sobre-escalamiento de verdes | dentro del margen aceptado |
 
