@@ -79,7 +79,7 @@ dato que el paciente no dijo: su salida se valida contra el texto crudo.
 | 🗣️ **Entiende cómo habla la gente** | *"treinta y ocho y medio"*, *"30 y 5"*, *"me duele harto"*, *"fiebre no he tenido"* — dígitos, palabras, negaciones y regionalismos |
 | 🤔 **No finge haber entendido** | Si la respuesta no aporta el dato, lo dice y repregunta. Si la cifra es imposible (58 °C), pide confirmación. Dos intentos y sigue con gracia |
 | 📄 **Responde con la guía en la mano** | Preguntas del paciente → cita textual del corpus con archivo y página, o un honesto *"no lo sé, se lo anoto al equipo"* |
-| 🧠 **Conocimiento vivo (G5)** | Subir un PDF → el agente lo cita en la siguiente consulta. Borrarlo → lo olvida. En caliente, desde la consola |
+| 🧠 **Conocimiento vivo (G5)** | Subir un PDF → el agente lo cita en la siguiente consulta. Borrarlo → lo olvida. Documento y guion de demostración listos en [`docs/demo/`](docs/demo/) |
 | 🚨 **Escala sin colgar** | Ante una bandera roja avisa, **termina la valoración** para que el equipo reciba el cuadro completo, y recapitula al despedirse |
 | 👵 **Acoge al cuidador** | *"Soy la hija, yo lo cuido"* → su relato vale y las alarmas barren su texto igual |
 | 📋 **Resumen estructurado al colgar** | Semáforo, motivos, cuadro clínico, qué quedó sin preguntar, costo — visible en pantalla y persistido en JSON |
@@ -266,6 +266,9 @@ falso negativo en posoperatorio es riesgo clínico.
 - [`docs/arquitectura.md`](docs/arquitectura.md) — arquitectura, flujo de
   decisión y la compuerta capa por capa. **Cada caja nombra un archivo real**:
   13 de 13 verificados contra el código.
+- [`docs/demo/`](docs/demo/) — documento de prueba para la compuerta G5 y el
+  guion de los cinco pasos: declarar el límite · subir · citar · eliminar ·
+  volver a declararlo.
 - [`docs/informe-final.md`](docs/informe-final.md) — declaración de modelo,
   la decisión técnica más relevante con sus siete fallas medidas, alternativas
   descartadas, riesgos y gobernanza.
