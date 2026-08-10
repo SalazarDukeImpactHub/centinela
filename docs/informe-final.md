@@ -166,6 +166,52 @@ entrenado para otra tarea no mejora por ser más grande.
 mejor que un reranker que cuesta 15 s y acierta 5/13. El experimento queda en el
 repositorio para que la decisión sea verificable.
 
+### 2.5 De cuestionario a conversación — y lo que costó aprenderlo
+
+Las llamadas de prueba dejaron una crítica que ninguna métrica mostraba: el
+agente sonaba a formulario. Tres conductas concretas, todas medidas con sondas
+sobre el pipeline real:
+
+| Conducta | Qué hacía |
+|---|---|
+| Preguntaba lo ya contestado | ante *«no he tenido fiebre, la herida seca, dolor dos y camino bien»* —los cuatro temas en un turno— preguntaba por la herida igual, y al turno siguiente decía *«no le entendí lo de la herida»* |
+| Contestaba con su propia agenda | *«me preocupa la herida»* recibía *«disculpe, no le entendí la temperatura»* y la misma pregunta otra vez |
+| Repetía el mismo acuse | una vez escalado, *«entiendo, eso sí es importante»* en todos los turnos siguientes |
+
+La corrección **no** fue darle conducción al modelo: eso rompería la tesis de
+toda la solución. Los cuatro temas siguen fijos y en orden clínico. Lo que cambia
+es que el cuestionario pasó a ser la **agenda** del agente en vez de su guion —
+tres reglas, todas en código determinista:
+
+1. **Se tacha lo ya contestado.** Si un detector llenó el dato, el tema queda
+   cubierto aunque nadie lo haya preguntado.
+2. **Se sigue el tema que trae el paciente.** El tema nombrado pasa al frente de
+   la cola y el pendiente vuelve después con *«volvamos a»*. Cambiar de tema no
+   es lo mismo que no responder: la evasión real sigue recibiendo su reintento.
+3. **Las palabras laxas exigen ancla.** *«Bien»*, *«normal»* y *«despacio»* solo
+   valen si el agente acaba de preguntar por ese tema o la frase lo nombra.
+
+**La tercera regla es la que enseñó el orden de las cosas, y costó una
+regresión.** La primera versión —solo las reglas 1 y 2— bajó el recall del banco
+conversacional de **12/12 a 11/12**. La causa: *«no muy bien la verdad, me
+despierto varias veces»* —el paciente hablando de cómo durmió— registraba la
+**herida como normal**, daba el tema por cubierto, la llamada terminaba tres
+turnos antes y la señal de minimización nunca llegaba al umbral que escalaba ese
+caso. En la misma revisión aparecieron dos falsos positivos gemelos: *«la veo
+bien»* —sobre la herida— escribía movilidad normal, y *«como uno se siente»* se
+anotaba como dolor 1/10.
+
+El aprendizaje es transferible a cualquier agente que decida qué preguntar a
+partir de lo que ya extrajo:
+
+> Cuando los temas se tachan solos, **un falso positivo del detector deja de ser
+> un dato de más y pasa a ser una pregunta que no se hace.** La fluidez no se
+> compra aflojando los detectores.
+
+Medido sobre los 160 casos de la capa ruidosa: recall en rojo **12/12** y verdes
+sobre-escalados **57/123**, contra 61/123 antes del cambio. La conversación se
+volvió más corta y más precisa a la vez.
+
 ### Qué cambiaría con más tiempo
 
 1. **Traducción completa del corpus**, no solo de la consulta. El diccionario
@@ -274,6 +320,7 @@ vocabulario de norma.
 | Latencia P50 / P95 | 4.196 ms / 10.620 ms |
 | Levantamiento (G2) | 6 min 07 s de 15 permitidos |
 | Recall en rojo — motor aislado | 12/12 |
-| Recall en rojo — pipeline conversacional completo | 10/12, **ninguno cae a verde** |
+| Recall en rojo — pipeline conversacional completo | 12/12, **ninguno cae a verde** |
+| Verdes sobre-escalados (capa ruidosa) | 57/123 |
 | Costo estimado por llamada | ~US$ 0,0006 |
-| Suite de pruebas | 284 |
+| Suite de pruebas | 343 |
