@@ -55,6 +55,13 @@ ERITEMA = [
 ]
 
 # Herida vista y sin hallazgos.
+#
+# Todas estas palabras son LAXAS: "bien", "normal" y "nada raro" describen
+# cualquier cosa. MEDIDO sobre los 160 casos: el paciente decía "no muy bien la
+# verdad, me despierto varias veces" —hablando de cómo durmió— y se registraba
+# la herida como NORMAL. Por eso solo cuentan si el agente acaba de preguntar
+# por la herida, o si la frase la nombra. Declarar sana una herida de la que
+# nadie habló es la clase de dato que después sostiene una decisión clínica.
 NORMAL = [
     r"\bnormal\b",
     r"\bbien\b",
@@ -65,6 +72,12 @@ NORMAL = [
     r"\bnada raro\b",
     r"\bsin nada\b",
 ]
+
+# Ancla: la frase tiene que estar hablando de la herida.
+_MENCIONA_HERIDA = re.compile(
+    r"\b(herida|cicatriz|costura|corte|punto|sutura|grapa|incision|zona|"
+    r"vendaje|gasa|aposito|curacion|curaci)\w*"
+)
 
 # El paciente NO la ha mirado: no es "normal", es desconocido. Confundirlos
 # registra como revisada una herida que nadie vio.
@@ -109,7 +122,11 @@ def _negado(normalizado: str, patron: re.Pattern[str]) -> bool:
     return True
 
 
-def estado_referido(texto: str) -> str | None:
+def menciona_herida(texto: str) -> bool:
+    return bool(_MENCIONA_HERIDA.search(_normalizar(texto)))
+
+
+def estado_referido(texto: str, *, en_contexto: bool = False) -> str | None:
     """Estado de la herida según lo dicho: el valor del enum `Herida`, o None.
 
     El orden importa y es clínico: la secreción manda sobre todo lo demás. Una
@@ -130,6 +147,13 @@ def estado_referido(texto: str) -> str | None:
             return "eritema_leve"
     if any(p.search(normalizado) for p in _NO_MIRADA):
         return "desconocido"
-    if any(p.search(normalizado) for p in _NORMAL):
-        return "normal"
+
+    # "Normal" solo cuenta si se está hablando de la herida: ni el agente puede
+    # dar por sana una herida que nadie mencionó, ni "no muy bien" es un informe
+    # sobre ella. Y se respeta la negación igual que en los hallazgos.
+    if not en_contexto and not _MENCIONA_HERIDA.search(normalizado):
+        return None
+    for p in _NORMAL:
+        if p.search(normalizado) and not _negado(normalizado, p):
+            return "normal"
     return None

@@ -49,25 +49,48 @@ MOVILIDAD_INCAPACITANTE = [
 MOVILIDAD_LIMITADA = [
     r"\bcon (dificultad|ayuda|bast[oó]n|caminador|muletas)",
     r"\bme cuesta (caminar|moverme|levantarme|pararme)",
-    r"\bdespacio\b",
     r"\bpoquito a poco\b",
     r"\bapenas (camino|me muevo)",
-    r"\blento\b",
 ]
 
 MOVILIDAD_NORMAL = [
     r"\bcamino (bien|normal|sin problema|sola|solo)",
     r"\bme muevo (bien|normal|sin problema)",
-    r"\bsin (problema|dificultad|ayuda)\b",
-    r"\bnormal\b",
-    r"\bbien\b",
     r"\bpuedo caminar\b",
     r"\bme levanto (bien|sola|solo|sin ayuda)",
 ]
 
+# Palabras que valen SOLO si la frase habla de moverse. Sueltas describen
+# cualquier cosa: "la herida la veo bien" no dice nada de la movilidad, y
+# "cicatriza lento" tampoco. MEDIDO: con "bien" y "normal" sin anclar, una
+# respuesta sobre la herida escribía movilidad normal en el cuadro —y, ya con la
+# agenda que se tacha sola, hacía que el agente ni preguntara por el movimiento.
+MOVILIDAD_LIMITADA_LAXA = [
+    r"\bdespacio\b",
+    r"\blento\b",
+]
+
+MOVILIDAD_NORMAL_LAXA = [
+    r"\bsin (problema|dificultad|ayuda)\b",
+    r"\bnormal\b",
+    r"\bbien\b",
+]
+
+# Ancla: la frase tiene que estar hablando de moverse.
+_MENCIONA_MOVILIDAD = re.compile(
+    r"\b(camin|mover|moverm|muevo|movi|levant|parad|pararm|pie\b|silla|cama\b|"
+    r"bano|muleta|caminador|baston|and(o|ar|a)\b|desplaz)\w*"
+)
+
 _INCAPACITANTE = [re.compile(p) for p in MOVILIDAD_INCAPACITANTE]
 _LIMITADA = [re.compile(p) for p in MOVILIDAD_LIMITADA]
 _NORMAL_MOV = [re.compile(p) for p in MOVILIDAD_NORMAL]
+_LIMITADA_LAXA = [re.compile(p) for p in MOVILIDAD_LIMITADA_LAXA]
+_NORMAL_LAXA = [re.compile(p) for p in MOVILIDAD_NORMAL_LAXA]
+
+
+def menciona_movilidad(texto: str) -> bool:
+    return bool(_MENCIONA_MOVILIDAD.search(_normalizar(texto)))
 
 # "cero" a "diez" en palabras, o un dígito suelto de 0 a 10.
 # El lookahead descarta números con unidad ajena al dolor. MEDIDO sobre los 160
@@ -80,8 +103,14 @@ _UNIDADES_AJENAS = (
 )
 _RE_DIGITO = re.compile(rf"\b(10|[0-9])\b(?!\s*(?:{_UNIDADES_AJENAS}))")
 _RE_PALABRA = re.compile(
-    r"\b(cero|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b"
+    r"\b(cero|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b"
 )
+
+# "Uno" y "una" son artículo y pronombre mucho más seguido que número. MEDIDO:
+# "como uno se siente después de esas cosas" se registraba como dolor 1/10.
+# Solo cuenta como cifra cuando cierra la frase —"¿del cero al diez? Uno."— o
+# cuando viene explícitamente como puntaje. "Una" no cuenta nunca.
+_RE_UNO = re.compile(r"\buno\b(?=\s*[.,;!?]*\s*$|\s+de\s+(?:dolor|diez))")
 
 
 def _normalizar(texto: str) -> str:
@@ -129,6 +158,9 @@ def nivel_dolor(texto: str, *, admitir_numero: bool = True) -> int | None:
         if m:
             return PALABRAS_NUMERO[m.group(1)]
 
+        if _RE_UNO.search(normalizado):
+            return 1
+
     # Escala verbal: se prueba de mayor a menor longitud para que "muy fuerte"
     # gane sobre "fuerte" y "mas o menos" sobre "medio". Fuera del contexto de
     # dolor exige que la frase lo nombre.
@@ -140,11 +172,17 @@ def nivel_dolor(texto: str, *, admitir_numero: bool = True) -> int | None:
     return None
 
 
-def estado_movilidad(texto: str) -> str | None:
+def estado_movilidad(texto: str, *, en_contexto: bool = False) -> str | None:
     """Estado de movilidad según lo dicho: valor del enum `Movilidad`, o None.
 
     El orden es clínico: la incapacidad manda. "No me puedo mover" y "puedo
     caminar" en la misma llamada no se promedian — la primera es la queja.
+
+    `en_contexto`: el agente acaba de preguntar por el movimiento, así que un
+    "bien" pelado ES la respuesta. Fuera de ese contexto las palabras laxas
+    exigen que la frase hable de moverse: "la herida la veo bien" no es una
+    respuesta sobre la movilidad, y registrarla como tal daba por resuelto un
+    tema que nadie preguntó.
     """
     normalizado = _normalizar(texto)
     if any(p.search(normalizado) for p in _INCAPACITANTE):
@@ -152,5 +190,12 @@ def estado_movilidad(texto: str) -> str | None:
     if any(p.search(normalizado) for p in _LIMITADA):
         return "limitada_esperada"
     if any(p.search(normalizado) for p in _NORMAL_MOV):
+        return "normal"
+
+    if not en_contexto and not menciona_movilidad(normalizado):
+        return None
+    if any(p.search(normalizado) for p in _LIMITADA_LAXA):
+        return "limitada_esperada"
+    if any(p.search(normalizado) for p in _NORMAL_LAXA):
         return "normal"
     return None

@@ -123,7 +123,7 @@ def main() -> int:
         print(f"\nLatencia del reranker: media {media:.0f} ms · "
               f"min {min(latencias):.0f} · max {max(latencias):.0f}")
         print(f"Decisiones que cambiaría respecto de la compuerta actual: {cambios}")
-        print(f"\nPresupuesto de latencia del turno (P50 medido): 5.131 ms")
+        print("\nPresupuesto de latencia del turno (P50 medido): 5.131 ms")
         print(f"El reranker agregaría un {media / 5131 * 100:.0f}% a ese presupuesto.")
     return 0
 

@@ -158,6 +158,28 @@ _INQUIETUD = _re.compile(
 )
 
 
+# Palabra con la que el paciente nombra cada tema. Sirve para saber QUÉ trajo,
+# no para extraer el dato: de eso se encargan los detectores clínicos.
+_TEMAS: tuple[tuple[Foco, _re.Pattern[str]], ...] = (
+    (Foco.HERIDA, _re.compile(r"\b(herida|cicatriz|costura)\w*")),
+    (Foco.DOLOR, _re.compile(r"\b(dolor|duele|dolia|molest|arde|punza)\w*")),
+    (Foco.FIEBRE, _re.compile(r"\b(fiebre|temperatura|escalofri|calentura)\w*")),
+    (Foco.MOVILIDAD, _re.compile(r"\b(camin|movi|levant|muleta|caminador)\w*")),
+)
+
+
+def _tema_traido(texto: str) -> Foco | None:
+    """Tema que el paciente nombró por su cuenta, o None.
+
+    Se usa para reordenar la cola de preguntas, nunca para registrar un dato.
+    """
+    plano = _sin_tildes(texto)
+    for foco, patron in _TEMAS:
+        if patron.search(plano):
+            return foco
+    return None
+
+
 def _es_inquietud(texto: str, foco: Foco | None) -> bool:
     """El paciente habla de algo que el cuestionario no cubre.
 
@@ -286,7 +308,14 @@ ACUSES: dict[Semaforo, tuple[str, ...]] = {
         "Lo dejo anotado para el equipo.",
         "Vale, eso lo tengo en cuenta.",
     ),
-    Semaforo.ROJO: ("Entiendo, eso sí es importante.",),
+    # Tres variantes y no una: medido en llamada real, una vez escalado el
+    # agente decía "Entiendo, eso sí es importante" en TODOS los turnos
+    # siguientes. La frase es correcta; repetida tres veces suena a máquina.
+    Semaforo.ROJO: (
+        "Entiendo, eso sí es importante.",
+        "Gracias por contármelo, eso lo anoto.",
+        "Ya quedó anotado, sigamos.",
+    ),
 }
 
 # Eco de lo escuchado: confirmar el dato concreto que el paciente acaba de dar
@@ -366,7 +395,7 @@ def _eco(texto_paciente: str, cifra_dicha: float | None, foco: Foco | None) -> s
         # El eco sale del estado DETECTADO, no del primer adjetivo del texto:
         # ante "roja, hinchada y le sale líquido" decir "me dice que la ve roja"
         # es quedarse con el hallazgo menos grave de los tres.
-        estado = herida_deteccion.estado_referido(texto_paciente)
+        estado = herida_deteccion.estado_referido(texto_paciente, en_contexto=True)
         ecos = {
             "secrecion_purulenta": "Eso que le sale de la herida es importante, lo anoto tal cual.",
             "eritema_leve": "Enrojecida, entendido.",
@@ -382,7 +411,7 @@ def _eco(texto_paciente: str, cifra_dicha: float | None, foco: Foco | None) -> s
         if nivel is not None:
             return "Sin dolor, qué bueno." if nivel == 0 else f"Un {nivel} de dolor, anotado."
     if foco is Foco.MOVILIDAD:
-        estado = dolor_deteccion.estado_movilidad(texto_paciente)
+        estado = dolor_deteccion.estado_movilidad(texto_paciente, en_contexto=True)
         ecos_mov = {
             "incapacitante_nueva": "Que no se pueda mover es importante, lo anoto.",
             "limitada_esperada": "Se mueve con dificultad, entendido.",
@@ -462,12 +491,38 @@ class EstadoLlamada:
     # del resumen. El agente conduce el cuestionario, pero el paciente tiene su
     # propia agenda — y quien reciba la alerta necesita saberla.
     inquietudes: list[str] = field(default_factory=list)
+    # Tema que el paciente trajo por su cuenta y todavía no dio dato. Pasa al
+    # frente de la cola: si abre diciendo "me preocupa la herida", preguntarle
+    # primero por la fiebre es contestarle con la agenda propia.
+    prioridad: Foco | None = None
 
     def siguiente_foco(self) -> Foco | None:
+        """El siguiente tema por preguntar, siguiendo al paciente cuando se puede.
+
+        ORDEN_FOCOS sigue mandando sobre lo que nadie mencionó —fiebre y herida
+        son las que más pesan y hay que asegurarlas temprano—, pero un tema que
+        el paciente acaba de traer se atiende primero. Es la diferencia entre
+        una agenda y un guion.
+        """
+        if self.prioridad is not None and self.prioridad not in self.preguntados:
+            return self.prioridad
         for foco in ORDEN_FOCOS:
             if foco not in self.preguntados:
                 return foco
         return None
+
+    def dar_por_cubierto(self, foco: Foco) -> None:
+        """El paciente ya contestó este tema, aunque nadie se lo haya preguntado.
+
+        Sin esto el agente preguntaba lo que acababan de contestarle. Medido:
+        ante "no he tenido fiebre, la herida seca, dolor dos y camino bien" —los
+        cuatro temas en un turno— el agente igual preguntaba por la herida, y al
+        turno siguiente respondía "no le entendí lo de la herida" a alguien que
+        se la había descrito. Eso es un formulario, no una conversación.
+        """
+        self.preguntados.add(foco)
+        if self.prioridad is foco:
+            self.prioridad = None
 
     def dato_pendiente(self) -> Foco | None:
         """Foco donde el paciente respondió pero falta la cifra que decide.
@@ -641,7 +696,10 @@ class Conversacion:
         # limitados al foco actual, el recall en rojo caía de 12/12 a 8/12. Cuatro
         # falsos negativos, dos de ellos clasificados VERDE. Lo que el paciente
         # dice, se escucha — lo haya preguntado el agente o no.
-        estado_herida = herida_deteccion.estado_referido(texto_paciente)
+        estado_herida = herida_deteccion.estado_referido(
+            texto_paciente,
+            en_contexto=self.estado.foco_actual is Foco.HERIDA,
+        )
         if estado_herida and estado_herida != "desconocido":
             with self._lock:
                 # El hallazgo más grave manda: un eritema posterior no borra una
@@ -650,12 +708,20 @@ class Conversacion:
                     self.estado.cuadro.herida.value
                 ):
                     self.estado.cuadro.herida = Herida(estado_herida)
+                self.estado.dar_por_cubierto(Foco.HERIDA)
 
         # El dolor por escala verbal ("me duele harto") se escucha siempre. Los
         # números pelados solo cuando se preguntó por dolor: un "37" suelto es
         # una temperatura, no un dolor de 37 —que además no existe—.
+        # …salvo que la propia frase nombre el dolor: "me duele muchísimo, como
+        # un ocho" trae la palabra y el número juntos, y esperar al turno de
+        # dolor para escucharlo era perder el dato que el paciente vino a dar.
         nivel_dolor = dolor_deteccion.nivel_dolor(
-            texto_paciente, admitir_numero=self.estado.foco_actual is Foco.DOLOR
+            texto_paciente,
+            admitir_numero=(
+                self.estado.foco_actual is Foco.DOLOR
+                or dolor_deteccion.menciona_dolor(texto_paciente)
+            ),
         )
         if nivel_dolor is not None:
             with self._lock:
@@ -664,14 +730,19 @@ class Conversacion:
                 # poquito" al final y el 8 de antes no se borra.
                 if previo is None or nivel_dolor > previo:
                     self.estado.cuadro.dolor_nrs = nivel_dolor
+                self.estado.dar_por_cubierto(Foco.DOLOR)
 
-        estado_movilidad = dolor_deteccion.estado_movilidad(texto_paciente)
+        estado_movilidad = dolor_deteccion.estado_movilidad(
+            texto_paciente,
+            en_contexto=self.estado.foco_actual is Foco.MOVILIDAD,
+        )
         if estado_movilidad:
             with self._lock:
                 if _gravedad_movilidad(estado_movilidad) >= _gravedad_movilidad(
                     self.estado.cuadro.movilidad.value
                 ):
                     self.estado.cuadro.movilidad = Movilidad(estado_movilidad)
+                self.estado.dar_por_cubierto(Foco.MOVILIDAD)
 
         # 1b. Fiebre en código y en este mismo turno, en sus dos variantes.
         #     Por la vía de la extracción ambas llegarían un turno tarde.
@@ -699,12 +770,23 @@ class Conversacion:
             with self._lock:
                 self.estado.cuadro.fiebre_c = cifra_dicha
                 self.estado.cuadro.fiebre_referida_sin_medir = False
+                self.estado.dar_por_cubierto(Foco.FIEBRE)
         elif fiebre.refiere_fiebre_sin_cifra(texto_paciente):
             # Se escucha aunque el agente estuviera preguntando otra cosa: el
             # paciente que dice "he estado acalorada" mientras se le pregunta por
             # la herida está reportando fiebre igual.
+            #
+            # El tema queda cubierto aunque falte el número: de pedir la cifra se
+            # encarga `dato_pendiente()`. Sin esto, el agente pedía la
+            # temperatura y DESPUÉS preguntaba "¿ha tenido fiebre?".
             with self._lock:
                 self.estado.cuadro.fiebre_referida_sin_medir = True
+                self.estado.dar_por_cubierto(Foco.FIEBRE)
+        elif fiebre.niega_fiebre(texto_paciente):
+            # Negar es contestar. "No he tenido fiebre" deja el tema cerrado
+            # aunque no escriba nada en el cuadro.
+            with self._lock:
+                self.estado.dar_por_cubierto(Foco.FIEBRE)
 
         # Intensidad dicha en palabras cuando se pidió el número: "Mucho."
         # Caso real: el paciente respondió "Mucho" a la pregunta por la
@@ -753,6 +835,16 @@ class Conversacion:
                     self.estado.datos_pedidos.add(Foco.FIEBRE)
                     self.estado.preguntados.add(Foco.FIEBRE)
                 prefijo_cifra = CIFRA_NO_OBTENIDA + " "
+
+        # 1c. El paciente nombró un tema que todavía no se ha preguntado y del
+        #     que no dio dato: pasa al frente de la cola. Si abre la llamada con
+        #     "me preocupa la herida", contestarle con la pregunta de fiebre es
+        #     responderle con la agenda propia. Solo adelanta UN tema; después la
+        #     cola vuelve al orden clínico.
+        with self._lock:
+            traido = _tema_traido(texto_paciente)
+            if traido is not None and traido not in self.estado.preguntados:
+                self.estado.prioridad = traido
 
         # 2. La extracción arranca en segundo plano y no bloquea nada.
         self._extraer_en_segundo_plano(texto_paciente, foco_previo)
@@ -837,16 +929,38 @@ class Conversacion:
         #     mejor seguir y dejar constancia de lo que quedó sin preguntar.
         with self._lock:
             foco_respondido_previo = self.estado.foco_actual
-        if (
+        sin_responder_lo_preguntado = (
             foco_respondido_previo is not None
-            and not decision.escala
-            and not prefijo
             and not prefijo_cifra  # ya se abandonó la cifra: no reintentar encima
             and cifra_dicha is None  # una cifra captada ES el dato
             and estado_herida is None  # un estado de herida detectado también
             and nivel_dolor is None
             and estado_movilidad is None
             and not _aporta_dato(texto_paciente, foco_respondido_previo)
+        )
+
+        # 3b-bis. El paciente no falló en responder: cambió de tema a propósito.
+        #     Medido: ante "me preocupa la herida" mientras se preguntaba por la
+        #     fiebre, el agente contestaba "disculpe, no le entendí la
+        #     temperatura" y repetía la misma pregunta. El paciente había hablado
+        #     con toda claridad — de otra cosa. Se le sigue el tema y el que
+        #     quedó pendiente vuelve a la cola, para retomarlo con "volvamos a".
+        cambio_de_tema = (
+            sin_responder_lo_preguntado
+            and traido is not None
+            and traido is not foco_respondido_previo
+            and foco_respondido_previo not in self.estado.repreguntados
+        )
+        if cambio_de_tema:
+            with self._lock:
+                self.estado.preguntados.discard(foco_respondido_previo)
+                self.estado.repreguntados.add(foco_respondido_previo)
+
+        if (
+            sin_responder_lo_preguntado
+            and not cambio_de_tema
+            and not decision.escala
+            and not prefijo
             and foco_respondido_previo not in self.estado.reintentados
         ):
             with self._lock:
@@ -942,6 +1056,9 @@ class Conversacion:
              if sin_dato_tras_reintento else None)
             or _eco_intensidad(intensidad)
             or _eco(texto_paciente, cifra_dicha, foco_respondido)
+            # El paciente trajo su tema: reconocerlo antes de entrar en él. Un
+            # "Listo, gracias" a "me preocupa la herida" suena a que no escuchó.
+            or ("Claro, hablemos de eso." if cambio_de_tema else None)
             or _elegir(ACUSES[decision.semaforo])
         )
         texto = f"{anuncio_alerta}{prefijo_cifra}{prefijo}{acuse} {pregunta}"

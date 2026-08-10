@@ -319,8 +319,11 @@ class TestCierre:
         r = conv.responder("me duele el pecho")
         assert r.escala and not r.cierra
 
+        # "me duele el pecho" no contesta la pregunta por la fiebre: el paciente
+        # cambió de tema. El agente lo sigue y vuelve a la fiebre más adelante,
+        # así que la valoración tarda un turno más que antes — y termina completa.
         for respuesta in ["la herida se ve bien", "el dolor es un 2",
-                          "camino sin problema", "no, nada más"]:
+                          "de fiebre nada", "camino sin problema", "no, nada más"]:
             conv.esperar_extraccion()
             r = conv.responder(respuesta)
             if r.cierra:
@@ -334,3 +337,105 @@ class TestCierre:
         conv.responder("hola")
         hablantes = {h for h, _ in conv.estado.transcripcion}
         assert hablantes == {"agente", "paciente"}
+
+
+class TestAgendaNoGuion:
+    """El cuestionario es la AGENDA del agente, no su guion.
+
+    Una enfermera también tiene cuatro cosas en la cabeza. La diferencia con un
+    formulario es que tacha lo que ya le contaron y sigue el tema que el
+    paciente trae. Estas tres fallas se midieron sobre el sistema real.
+    """
+
+    def test_no_pregunta_lo_que_el_paciente_ya_contesto(self):
+        """Los cuatro temas en un turno: no queda nada que preguntar.
+
+        Antes el agente preguntaba igual por la herida, y al turno siguiente
+        respondía "no le entendí lo de la herida" a alguien que se la había
+        descrito.
+        """
+        conv, _ = _conversacion()
+        conv.abrir()
+        r = conv.responder(
+            "No he tenido fiebre, la herida la veo seca y limpia, "
+            "el dolor es como un dos y camino bien."
+        )
+        conv.esperar_extraccion()
+        assert conv.estado.siguiente_foco() is None
+        assert "herida" not in r.texto.lower()
+        assert conv.estado.cuadro.dolor_nrs == 2
+
+    def test_sigue_el_tema_que_trae_el_paciente(self):
+        """"Me preocupa la herida" recibía "no le entendí la temperatura"."""
+        conv, _ = _conversacion()
+        conv.abrir()
+        r = conv.responder("Me preocupa la herida.")
+        conv.esperar_extraccion()
+        assert r.foco is Foco.HERIDA
+        assert "no le entendí" not in r.texto
+
+    def test_el_tema_que_quedo_pendiente_vuelve(self):
+        """Seguir al paciente no es abandonar lo que faltaba preguntar."""
+        conv, _ = _conversacion()
+        conv.abrir()  # pregunta por fiebre
+        conv.responder("Me preocupa la herida.")
+        conv.esperar_extraccion()
+        assert Foco.FIEBRE not in conv.estado.preguntados, "la fiebre se perdió"
+        r = conv.responder("Está roja.")
+        conv.esperar_extraccion()
+        assert r.foco is Foco.FIEBRE
+
+    def test_la_esquiva_de_verdad_si_recibe_reintento(self):
+        """Cambiar de tema no es lo mismo que no responder."""
+        conv, _ = _conversacion()
+        conv.abrir()
+        r = conv.responder("Ay, no sabría decirle.")
+        conv.esperar_extraccion()
+        assert "no le entendí" in r.texto.lower()
+        assert r.foco is Foco.FIEBRE
+
+    def test_el_acuse_en_rojo_no_se_repite_igual(self):
+        """Una sola variante hacía que todo turno tras escalar sonara idéntico."""
+        from src.conversacion.turno import ACUSES
+        from src.clinico.escalamiento import Semaforo
+
+        assert len(ACUSES[Semaforo.ROJO]) >= 3
+
+
+class TestMovilidadNoSeInventa:
+    """"La veo bien" —hablando de la herida— no es una respuesta de movilidad.
+
+    Con "bien" y "normal" sin anclar, una respuesta sobre la herida escribía
+    movilidad normal en el cuadro. Con la agenda que se tacha sola, además hacía
+    que el agente NI PREGUNTARA por el movimiento.
+    """
+
+    def test_un_bien_suelto_no_es_movilidad(self):
+        from src.clinico.dolor import estado_movilidad
+
+        assert estado_movilidad("la veo bien") is None
+        assert estado_movilidad("la herida está normal") is None
+        assert estado_movilidad("cicatriza lento") is None
+
+    def test_pero_si_lo_es_cuando_se_pregunto_por_el_movimiento(self):
+        from src.clinico.dolor import estado_movilidad
+
+        assert estado_movilidad("bien", en_contexto=True) == "normal"
+        assert estado_movilidad("despacio", en_contexto=True) == "limitada_esperada"
+
+    def test_y_lo_es_cuando_la_frase_habla_de_moverse(self):
+        from src.clinico.dolor import estado_movilidad
+
+        assert estado_movilidad("camino bien") == "normal"
+        assert estado_movilidad("me levanto sin problema") == "normal"
+        assert estado_movilidad("camino despacio") == "limitada_esperada"
+        assert estado_movilidad("no me puedo mover") == "incapacitante_nueva"
+
+    def test_la_herida_no_cierra_el_tema_del_movimiento(self):
+        conv, _ = _conversacion()
+        conv.abrir()
+        conv.responder("no he tenido fiebre")
+        conv.esperar_extraccion()
+        conv.responder("la veo bien")
+        conv.esperar_extraccion()
+        assert Foco.MOVILIDAD not in conv.estado.preguntados

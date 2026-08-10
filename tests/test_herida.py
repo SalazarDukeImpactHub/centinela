@@ -52,7 +52,8 @@ class TestPrioridadClinica:
         ],
     )
     def test_clasifica_los_demas_estados(self, texto: str, esperado: str):
-        assert estado_referido(texto) == esperado
+        """Con `en_contexto`: son respuestas a la pregunta por la herida."""
+        assert estado_referido(texto, en_contexto=True) == esperado
 
     def test_no_inventa_estado_cuando_no_se_habla_de_la_herida(self):
         assert estado_referido("me duele la cabeza") is None
@@ -227,3 +228,59 @@ class TestInquietudesDelPaciente:
             if r.cierra:
                 break
         assert "no era parte de mis preguntas" in r.texto
+
+
+class TestNoDeclararSanaUnaHeridaDeLaQueNadieHablo:
+    """"Bien" y "normal" describen cualquier cosa, no una herida.
+
+    MEDIDO sobre los 160 casos: el paciente decía "no muy bien la verdad, me
+    despierto varias veces" —hablando de cómo durmió— y la herida quedaba
+    registrada como NORMAL. Con la agenda que se tacha sola, además el agente ni
+    preguntaba por ella: la llamada terminaba antes y un caso rojo del banco
+    caía a amarillo.
+    """
+
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "no muy bien la verdad, me despierto varias veces",
+            "ahí normal, como uno se siente después de esas cosas",
+            "pues ahí vamos, bien",
+            "el ánimo lo tengo bien",
+        ],
+    )
+    def test_un_bien_suelto_no_declara_sana_la_herida(self, texto: str):
+        assert estado_referido(texto) is None
+
+    def test_pero_si_cuenta_cuando_se_pregunto_por_la_herida(self):
+        assert estado_referido("bien", en_contexto=True) == "normal"
+        assert estado_referido("ahí normal", en_contexto=True) == "normal"
+
+    def test_y_cuenta_cuando_la_frase_nombra_la_herida(self):
+        assert estado_referido("la herida la veo bien") == "normal"
+        assert estado_referido("la cicatriz está seca") == "normal"
+
+    def test_los_hallazgos_no_necesitan_ancla(self):
+        """Una secreción se escucha SIEMPRE, se hablara de la herida o no."""
+        assert estado_referido("le sale pus") == "secrecion_purulenta"
+        assert estado_referido("está roja") == "eritema_leve"
+
+    def test_la_herida_normal_negada_no_se_registra(self):
+        assert estado_referido("la herida no está bien", en_contexto=True) != "normal"
+
+
+class TestUnoNoEsSiempreElNumeroUno:
+    """"Como uno se siente" se registraba como dolor 1/10."""
+
+    def test_el_pronombre_no_es_una_cifra(self):
+        from src.clinico.dolor import nivel_dolor
+
+        assert nivel_dolor("como uno se siente después de esas cosas") is None
+        assert nivel_dolor("una molestia nada más") != 1
+
+    def test_pero_uno_como_respuesta_si_es_una_cifra(self):
+        from src.clinico.dolor import nivel_dolor
+
+        assert nivel_dolor("uno") == 1
+        assert nivel_dolor("Uno.") == 1
+        assert nivel_dolor("como un uno de dolor") == 1
