@@ -395,6 +395,12 @@ function resumenEnLlamada(r) {
       ${filas.map(([k, v]) => `<div><div class="lbl">${k}</div><div style="font-size:13px;font-weight:600">${esc(String(v))}</div></div>`).join('')}
     </div>
     ${r.sin_preguntar.length ? `<div class="mono" style="margin-top:9px;font-size:11px;color:var(--warn-t)">Quedó sin preguntar: ${esc(r.sin_preguntar.join(', '))}</div>` : ''}
+    ${(r.inquietudes_del_paciente || []).length ? `
+      <div style="margin-top:11px;border-top:1px solid ${c.b};padding-top:9px">
+        <div class="lbl">Lo que el paciente trajo por su cuenta</div>
+        ${r.inquietudes_del_paciente.map((i) => `
+          <div style="margin-top:5px;font-size:13px;color:var(--text);font-style:italic">«${esc(i)}»</div>`).join('')}
+      </div>` : ''}
     <div class="mono" style="margin-top:9px;font-size:10.5px;color:var(--text-2)">
       Registro turno a turno: ${esc(r.registro_turnos)} · costo estimado ${r.costo.total_usd} USD
     </div>`;
