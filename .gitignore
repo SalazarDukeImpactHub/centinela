@@ -21,3 +21,19 @@ Thumbs.db
 # Voz de Piper: 63 MB descargables con
 #   python -m piper.download_voices es_MX-claude-high --data-dir models/piper
 models/piper/
+
+# ── Limpieza de entrega ──────────────────────────────────────────────────────
+# Herramientas internas del entorno de desarrollo, ajenas al reto.
+.atl/
+.claude/
+openspec/
+
+# Carpeta de trabajo del endpoint de carga. La API la crea al arrancar
+# (SUBIDAS.mkdir) y el compose la monta. Lo que se sube en una demostración no
+# es parte de la entrega — el PDF de la demo G5 vive en docs/demo/.
+subidas/
+
+# Audio de comparación de voces y de pruebas manuales: 3,5 MB que ninguna
+# prueba usa. La evidencia de la decisión de voz es el RTF medido, que está en
+# el informe; los WAV se quedan en local para el video.
+tests/audio/

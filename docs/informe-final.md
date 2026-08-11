@@ -306,6 +306,23 @@ Cada llamada deja dos archivos en `logs/`:
 Las métricas del README se recalculan desde esos archivos con
 `python scripts/metricas_readme.py`. **No hay números escritos a mano.**
 
+### Auditoría de seguridad pre-entrega
+
+Documentada en [`docs/security/audit-final.md`](security/audit-final.md). El
+hallazgo de severidad alta merece constar acá porque contradice una revisión
+anterior: el endpoint de carga de documentos concatenaba el nombre de archivo del
+cliente directo contra la carpeta de subidas. Se validaba la extensión, **no la
+ruta**, así que `../../../fuera.pdf` y `C:/Windows/Temp/evil.pdf` escapaban de la
+carpeta. Escritura de archivo arbitraria limitada a `.pdf` — suficiente para
+sobrescribir un documento del corpus y envenenar lo que el agente le cita a un
+paciente. Corregido, con 19 pruebas que lo fijan.
+
+La revisión de la fase F2 declaraba esa superficie dentro de su alcance y no la
+cubría. **No se editó ese documento hacia atrás.** La corrección se registra en
+la auditoría nueva: una revisión de seguridad que se reescribe deja de ser
+evidencia, y el valor del historial está justamente en que muestre lo que se pasó
+por alto.
+
 ---
 
 ## 5. Gobernanza — arquitectura de controles trazable a ISO/IEC 42001
@@ -345,4 +362,4 @@ vocabulario de norma.
 | Recall en rojo — pipeline conversacional completo | 12/12, **ninguno cae a verde** |
 | Verdes sobre-escalados (capa ruidosa) | 57/123 |
 | Costo estimado por llamada | ~US$ 0,0006 |
-| Suite de pruebas | 350 |
+| Suite de pruebas | 379 |

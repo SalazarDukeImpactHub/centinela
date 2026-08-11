@@ -318,7 +318,9 @@ async function enviarTurno() {
     const d = await r.json();
     pintar(d);
     reproducir(d.audio_wav_base64);
-    if (d.finalizada) finalizar();
+    // El agente se despidió solo: se cierra por el mismo camino que el botón,
+    // para que el resumen quede en pantalla igual que si lo hubieran colgado.
+    if (d.finalizada) cerrarLlamada();
   } catch (e) {
     estado('Error del servicio', e.message, 'var(--crit)');
     avisoEnLlamada(e.message);
@@ -353,8 +355,18 @@ function avisoEnLlamada(mensaje) {
   $('tr').scrollTop = $('tr').scrollHeight;
 }
 
-$('btnColgar').onclick = async () => {
+/* Cierre de la llamada. Vive aparte del botón porque hay DOS formas de terminar
+ * una llamada y las dos tienen que dejar el resumen en pantalla:
+ *
+ *   1. El operador aprieta «Colgar».
+ *   2. El agente se despide solo, tras cubrir todas las preguntas.
+ *
+ * El segundo caso solo llamaba a finalizar(), que desarma la interfaz. La
+ * llamada terminaba bien y el resumen —el entregable que el jurado pide— no
+ * aparecía nunca. Medido en llamada real por voz. */
+async function cerrarLlamada() {
   if (!llamadaId) return;
+  const id = llamadaId;
   $('btnColgar').disabled = true;
   // El cierre espera a que termine la extracción pendiente para que el resumen
   // sea fiel, y eso puede tardar unos segundos. Sin esta señal, la consola
@@ -362,7 +374,7 @@ $('btnColgar').onclick = async () => {
   $('btnColgar').textContent = 'Cerrando y guardando el resumen…';
   estado('Cerrando llamada', 'Consolidando el resumen clínico', 'var(--warn)');
   try {
-    const r = await fetch(`/api/llamada/${llamadaId}/colgar`, { method: 'POST' });
+    const r = await fetch(`/api/llamada/${id}/colgar`, { method: 'POST' });
     const d = await r.json();
     pintar(d);
     if (d.resumen) resumenEnLlamada(d.resumen);
@@ -372,7 +384,9 @@ $('btnColgar').onclick = async () => {
     $('btnColgar').textContent = 'Colgar';
     finalizar();
   }
-};
+}
+
+$('btnColgar').onclick = cerrarLlamada;
 
 /* Resumen al pie de la transcripción: el jurado lo pide como entregable y el
  * operador necesita verlo sin abrir un archivo. */

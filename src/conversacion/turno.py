@@ -195,15 +195,23 @@ def _es_inquietud(texto: str, foco: Foco | None) -> bool:
     return bool(_INQUIETUD.search(plano))
 
 
+# Prefijo afirmativo, no frase completa. MEDIDO en llamada real por voz: a la
+# pregunta "¿ha tenido fiebre o escalofríos estos días?" el paciente contestó
+# "He tenido estos días" —afirmó y devolvió el final de la pregunta— y no se
+# registró NADA: el patrón exigía que la frase entera fuera la afirmación, así
+# que cualquier coletilla la invalidaba. Lo mismo con "Sí, a veces" y "Sí señor,
+# un poco". Una afirmación de fiebre perdida deja el resumen diciendo que no se
+# pudo averiguar, sobre un paciente que dijo que sí.
 _AFIRMACION = _re.compile(
-    r"^\s*(si|sí|claro|correcto|asi es|así es|he tenido|si he tenido|un poco|"
-    r"a veces|creo que si|creo que sí|me parece que si)[\s.,!]*$",
+    r"^\s*[¡!]*\s*(si|sí|claro|correcto|asi es|así es|he tenido|si he tenido|"
+    r"sí he tenido|un poco|un poquito|a veces|creo que si|creo que sí|"
+    r"me parece que si|me parece que sí)\b",
     _re.IGNORECASE,
 )
 
 
 def _es_afirmacion(texto: str) -> bool:
-    """Respuesta corta que afirma sin dar detalle: "sí", "he tenido", "un poco"."""
+    """Respuesta que ARRANCA afirmando: "sí", "he tenido estos días", "un poco"."""
     return bool(_AFIRMACION.match(texto.strip()))
 
 # Repregunta por DATO FALTANTE: el paciente respondió, pero sin la cifra que la
@@ -768,7 +776,17 @@ class Conversacion:
         # "Perfecto, anotado" y cambió de tema — una afirmación de fiebre quedó
         # sin pedir la cifra. La afirmación responde a LA PREGUNTA HECHA, y la
         # pregunta era por fiebre.
-        if en_contexto_fiebre and _es_afirmacion(texto_paciente)                 and not fiebre.tiene_cifra(texto_paciente)                 and not fiebre.niega_fiebre(texto_paciente):
+        # El "sí" tiene que estar afirmando LA FIEBRE. Si el paciente arranca
+        # afirmando pero habla de otra cosa —"sí, la herida está roja"— eso no es
+        # una fiebre referida: el detector de ese tema ya lo recoge.
+        afirma_la_fiebre = (
+            en_contexto_fiebre
+            and _es_afirmacion(texto_paciente)
+            and not fiebre.tiene_cifra(texto_paciente)
+            and not fiebre.niega_fiebre(texto_paciente)
+            and _tema_traido(texto_paciente) in (None, Foco.FIEBRE)
+        )
+        if afirma_la_fiebre:
             with self._lock:
                 self.estado.cuadro.fiebre_referida_sin_medir = True
 

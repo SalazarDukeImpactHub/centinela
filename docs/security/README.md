@@ -1,20 +1,28 @@
-# Revisiones de seguridad — protocolo
+# Revisiones de seguridad
 
-Cada fase del desarrollo cierra con una revisión de seguridad documentada aquí.
-Formato de archivo: `FN-revision-seguridad.md` (una por fase que toque superficie de ataque).
+Cada revisión reporta alcance, hallazgos por severidad, correcciones aplicadas
+con su prueba, y pendientes justificados.
 
-| Fase | Foco | Evidencia |
+| Momento | Foco | Evidencia |
 |---|---|---|
-| F0 | Manejo de secretos (.env), superficie del compose | `F0-revision-seguridad.md` |
-| F1–F2 | Validación de entradas, sanitización hacia RAG y modelo, path traversal en consola de carga | `F2-revision-seguridad.md` |
-| F4 | Batería de inyección de prompt ejecutable + resultados | `F4-revision-seguridad.md` |
-| Pre-entrega | Audit OWASP A01–A10 completo | `audit-final.md` |
+| F1–F2 | Validación de entradas y sanitización hacia el RAG y el modelo | [`F2-revision-seguridad.md`](F2-revision-seguridad.md) |
+| Continuo | Batería ejecutable de inyección de prompt | [`tests/test_saneamiento.py`](../../tests/test_saneamiento.py) — 38 pruebas, corre en cada `pytest` |
+| Pre-entrega | Auditoría completa de la superficie expuesta | [`audit-final.md`](audit-final.md) |
+| Pre-entrega | Path traversal en la carga de documentos | [`tests/test_seguridad_carga.py`](../../tests/test_seguridad_carga.py) — 19 pruebas |
+
+## Sobre la trazabilidad de estas revisiones
+
+La batería de inyección vive como **pruebas ejecutables y no como un documento**
+a propósito: un informe de seguridad envejece en silencio, una prueba que se
+rompe avisa. Corre en cada `pytest tests/`.
+
+Por la misma razón, la revisión F2 no se editó hacia atrás cuando la auditoría
+pre-entrega encontró que una de las superficies que declaraba en su alcance —el
+path traversal en la consola de carga— no estaba realmente cubierta. La
+corrección se documenta en `audit-final.md`. Una revisión de seguridad que se
+reescribe hacia atrás deja de ser evidencia.
 
 ## Riesgos aceptados
 
-| Riesgo | Por qué se acepta | Mitigación |
-|---|---|---|
-| API key de Groq incluida en el repo público | Exigido por la compuerta G2 del reto ("credenciales, URLs y accesos incluidos") | Key desechable creada para la evaluación · revocación inmediata post-evaluación (18 ago) · sin otros permisos asociados |
-
-Cada revisión reporta: alcance, hallazgos por severidad (Critical/High/Medium/Low),
-fixes aplicados con commit asociado, y pendientes justificados.
+Se declaran, con su justificación y mitigación, en
+[`audit-final.md`](audit-final.md#riesgos-aceptados).

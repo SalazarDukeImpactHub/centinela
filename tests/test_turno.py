@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from src.clinico.escalamiento import Semaforo
 from src.conversacion.turno import (
     ORDEN_FOCOS,
@@ -513,3 +515,68 @@ class TestLaFiebreNegadaNoEsUnVacio:
         fusionado = _fusionar(previo, {"fiebre_c": 38.5})
         assert not fusionado.fiebre_negada
         assert "fiebre" not in fusionado.campos_faltantes
+
+
+class TestLaAfirmacionConColetilla:
+    """MEDIDO en llamada real por voz, con micrófono.
+
+    A "¿ha tenido fiebre o escalofríos estos días?" el paciente contestó
+    "He tenido estos días" —afirmó y devolvió el final de la pregunta— y no se
+    registró nada. El patrón exigía que la frase ENTERA fuera la afirmación.
+
+    El costo de perderla es un falso negativo: en esa misma llamada el paciente
+    después dijo que veía la herida roja, y fiebre referida sin medir + hallazgo
+    en la herida escala a ROJO por sospecha de infección de sitio operatorio.
+    Sin la afirmación, la llamada cerró en amarillo.
+    """
+
+    def test_afirmar_devolviendo_la_pregunta_cuenta(self):
+        conv, _ = _conversacion()
+        conv.abrir()
+        conv.responder("He tenido estos días")
+        conv.esperar_extraccion()
+        assert conv.estado.cuadro.fiebre_referida_sin_medir
+
+    def test_pide_la_cifra_en_vez_de_cambiar_de_tema(self):
+        conv, _ = _conversacion()
+        conv.abrir()
+        r = conv.responder("He tenido estos días")
+        assert "temperatura" in r.texto.lower()
+        assert r.foco is Foco.FIEBRE
+
+    def test_la_fiebre_afirmada_con_herida_roja_escala(self):
+        from src.clinico.escalamiento import Semaforo
+
+        conv, _ = _conversacion()
+        conv.abrir()
+        conv.responder("He tenido estos días")
+        conv.esperar_extraccion()
+        conv.responder("no me la tomé")
+        conv.esperar_extraccion()
+        r = conv.responder("La herida la he visto roja.")
+        assert r.decision.semaforo is Semaforo.ROJO
+        assert any("infección" in m or "fiebre referida" in m for m in r.decision.motivos)
+
+    @pytest.mark.parametrize("texto", ["Sí, a veces", "Sí señor, un poco", "Un poquito anoche"])
+    def test_otras_formas_de_afirmar(self, texto: str):
+        conv, _ = _conversacion()
+        conv.abrir()
+        conv.responder(texto)
+        conv.esperar_extraccion()
+        assert conv.estado.cuadro.fiebre_referida_sin_medir, texto
+
+    def test_el_si_tiene_que_estar_afirmando_la_fiebre(self):
+        """"Sí, la herida está roja" no es una fiebre: es una herida."""
+        conv, _ = _conversacion()
+        conv.abrir()
+        conv.responder("Sí, la herida está roja")
+        conv.esperar_extraccion()
+        assert not conv.estado.cuadro.fiebre_referida_sin_medir
+
+    @pytest.mark.parametrize("texto", ["No, nada", "El contenido.", "¡Papá!"])
+    def test_lo_que_no_afirma_no_registra_fiebre(self, texto: str):
+        conv, _ = _conversacion()
+        conv.abrir()
+        conv.responder(texto)
+        conv.esperar_extraccion()
+        assert not conv.estado.cuadro.fiebre_referida_sin_medir, texto

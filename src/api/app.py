@@ -24,7 +24,7 @@ import tempfile
 import uuid
 import wave
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -720,6 +720,31 @@ async def listar_documentos() -> JSONResponse:
     )
 
 
+def _nombre_seguro(filename: str) -> str:
+    """Deja solo el nombre del archivo, sin ninguna ruta.
+
+    HALLAZGO DE LA AUDITORÍA PRE-ENTREGA. El nombre llegaba del cliente y se
+    concatenaba directo: `SUBIDAS / archivo.filename`. `pathlib` no sanea nada,
+    y dos formas medidas escapaban de la carpeta:
+
+        "../../../fuera.pdf"       -> escribía dos niveles arriba del proyecto
+        "C:/Windows/Temp/evil.pdf" -> ruta ABSOLUTA: pathlib descarta la base
+
+    Es escritura de archivo arbitraria, limitada solo a la extensión `.pdf`. El
+    contenedor corre sin privilegios, pero sobrescribir un `.pdf` del propio
+    corpus alcanza para envenenar lo que el agente le cita a un paciente.
+
+    Se normalizan las dos barras porque el servidor corre en Linux y el cliente
+    puede ser Windows: `PurePosixPath` no reconoce `\\` como separador y
+    "..\\..\\x.pdf" pasaría entero como nombre.
+    """
+    plano = filename.replace("\\", "/")
+    nombre = PurePosixPath(plano).name
+    if not nombre or nombre.startswith(".") or not nombre.lower().endswith(".pdf"):
+        raise HTTPException(400, "nombre de archivo no permitido")
+    return nombre
+
+
 @app.post("/api/documentos")
 async def subir_documento(archivo: UploadFile, escenario: str = ESCENARIO_DEMO):
     """Sube un PDF, lo procesa y lo deja disponible. Es la mitad 'aprender' de G5."""
@@ -728,7 +753,13 @@ async def subir_documento(archivo: UploadFile, escenario: str = ESCENARIO_DEMO):
     if not archivo.filename or not archivo.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "solo se aceptan archivos PDF")
 
-    destino = SUBIDAS / archivo.filename
+    nombre = _nombre_seguro(archivo.filename)
+    destino = SUBIDAS / nombre
+    # Cinturón y tirantes: aunque el saneo ya quitó las rutas, se comprueba que
+    # el destino resuelto caiga DENTRO de la carpeta de subidas. Si algún día
+    # cambia el saneo, esto sigue cerrando la puerta.
+    if SUBIDAS.resolve() not in destino.resolve().parents:
+        raise HTTPException(400, "nombre de archivo no permitido")
     destino.write_bytes(await archivo.read())
 
     temporal = uuid.uuid4().hex[:8]
