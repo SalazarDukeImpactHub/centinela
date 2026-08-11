@@ -23,6 +23,10 @@
 
 Hecho por **Jennifer Salazar Duke** · Salazar Duke Impact Hub
 
+<br />
+
+### ▶️ [Ver el video: demo funcional + preguntas de cierre](https://youtu.be/L5bIe14duvo)
+
 </div>
 
 ---
@@ -263,8 +267,9 @@ falso negativo en posoperatorio es riesgo clínico.
 
 ---
 
-## 📐 Diagrama e informe
+## 📐 Los cuatro entregables
 
+- **🎥 Video** — [demo funcional y las dos preguntas de cierre](https://youtu.be/L5bIe14duvo).
 - [`docs/arquitectura.md`](docs/arquitectura.md) — arquitectura, flujo de
   decisión y la compuerta capa por capa. **Cada caja nombra un archivo real**:
   13 de 13 verificados contra el código.
