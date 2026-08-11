@@ -596,3 +596,41 @@ class TestLaAfirmacionConColetilla:
         assert conv.estado.cuadro.fiebre_referida_sin_medir
         assert "no le entendí" not in r.texto.lower()
         assert "temperatura" in r.texto.lower(), "debería pedir la cifra"
+
+
+class TestLaDespedidaRespondeYElCierreNoCuentaLatencia:
+    """En la despedida el paciente suele soltar su duda; hay que responderla.
+
+    MEDIDO: preguntó "¿cuándo puedo mover el brazo?" en el "¿algo más?" y el
+    cierre la ignoró. Y ese turno de cierre, que espera al modelo para
+    consolidar, inflaba el p95 con una latencia que el paciente ya no percibe.
+    """
+
+    def test_una_pregunta_en_la_despedida_se_responde(self):
+        respuestas = {"cuando puedo mover el brazo": "Dice la guía: mueva el hombro a las 48 horas. [pág. 1]"}
+
+        def consultor(preg: str):
+            from src.conversacion.turno import _sin_tildes
+            return respuestas.get(_sin_tildes(preg).strip("¿?").strip())
+
+        cliente = ClienteFalso()
+        conv = Conversacion(cliente, EstadoLlamada(escenario="breast_cancer"), consultor=consultor)
+        conv.abrir()
+        for r in ["no he tenido fiebre", "la herida está normal", "un 2 de dolor", "camino bien"]:
+            conv.responder(r); conv.esperar_extraccion()
+        # ahora el agente ofreció la despedida; el paciente pregunta
+        r = conv.responder("¿Cuándo puedo mover el brazo?")
+        assert r.cierra
+        assert "48 horas" in r.texto, "ignoró la pregunta hecha en la despedida"
+
+
+def test_el_turno_de_cierre_no_entra_en_los_percentiles():
+    from src.observabilidad.metricas import RegistroLlamada
+    import tempfile, pathlib
+
+    reg = RegistroLlamada("x", pathlib.Path(tempfile.mkdtemp()) / "x.jsonl")
+    for lat in (3000.0, 4000.0, 5000.0):
+        m = reg.nuevo_turno(); m.latencia_ms = lat
+    cierre = reg.nuevo_turno(); cierre.latencia_ms = 87000.0; cierre.es_cierre = True
+    assert reg.p95() < 6000, "el cierre infló el p95"
+    assert 87000.0 not in reg.latencias

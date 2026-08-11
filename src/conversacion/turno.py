@@ -931,7 +931,25 @@ class Conversacion:
             # desde el corpus: al paciente que quiere saber si lo escucharon,
             # contestarle "no está en mi documentación" lo trata como máquina.
             prefijo = self._confirmar_registro() + " "
-        elif not decision.escala and preguntas.contiene_pregunta(texto_paciente):
+        elif (
+            not decision.escala
+            and preguntas.contiene_pregunta(texto_paciente)
+            # Un dato clínico ya extraído significa que el paciente RESPONDIÓ, no
+            # que preguntó. MEDIDO: contestó "yo puedo caminar como esperaba" a
+            # la pregunta por el movimiento y el "puedo" lo hizo consultar el
+            # corpus, que le leyó una guía sobre movilización. Solo se consulta
+            # si de verdad preguntó —hay signo— pese a haber dado el dato.
+            and (
+                "?" in texto_paciente
+                or (
+                    cifra_dicha is None
+                    and estado_herida is None
+                    and nivel_dolor is None
+                    and estado_movilidad is None
+                    and not afirma_la_fiebre
+                )
+            )
+        ):
             respuesta_corpus = self.consultor(texto_paciente) if self.consultor else None
             prefijo = (respuesta_corpus or SIN_RESPUESTA) + " "
 
@@ -1093,7 +1111,12 @@ class Conversacion:
                     cierra=False,
                     alarmas_detectadas=detectadas,
                 )
-            return self._cerrar(decision)
+            # Si en la despedida el paciente hizo una pregunta, se responde
+            # antes de cerrar. MEDIDO: preguntó "¿cuándo puedo mover el brazo?"
+            # justo en el «¿algo más?» y el cierre la ignoró —la respuesta del
+            # corpus quedaba en `prefijo` y `_cerrar` no la miraba—. Es
+            # exactamente el momento en que el paciente suele soltar su duda.
+            return self._cerrar(decision, prefijo=prefijo)
 
         es_repregunta = foco in self.estado.repreguntados
         pregunta = _elegir((REPREGUNTAS if es_repregunta else PREGUNTAS)[foco])
@@ -1137,8 +1160,12 @@ class Conversacion:
             alarmas_detectadas=detectadas,
         )
 
-    def _cerrar(self, decision: Decision) -> RespuestaTurno:
-        """Cierra la llamada. Antes espera la extracción: el resumen debe ser fiel."""
+    def _cerrar(self, decision: Decision, prefijo: str = "") -> RespuestaTurno:
+        """Cierra la llamada. Antes espera la extracción: el resumen debe ser fiel.
+
+        `prefijo` lleva la respuesta a una pregunta hecha en la despedida —del
+        corpus con cita, o el límite declarado—, que se dice antes del cierre.
+        """
         self.esperar_extraccion()
         with self._lock:
             decision = evaluar(self.estado.cuadro)
@@ -1150,6 +1177,7 @@ class Conversacion:
             texto = CIERRE_AMARILLO
         else:
             texto = CIERRE_VERDE
+        texto = f"{prefijo}{texto}"
 
         if self.estado.inquietudes:
             # Se nombra lo que el paciente trajo: preguntó por su cuenta y el

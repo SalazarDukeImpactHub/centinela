@@ -284,3 +284,33 @@ class TestUnoNoEsSiempreElNumeroUno:
         assert nivel_dolor("uno") == 1
         assert nivel_dolor("Uno.") == 1
         assert nivel_dolor("como un uno de dolor") == 1
+
+
+class TestElNoQueAfirma:
+    """"No, la herida está normal": el "No" niega los hallazgos y AFIRMA el normal.
+
+    MEDIDO en llamada real. A "¿la ha visto roja, hinchada o con líquido?" el
+    paciente contestó "No, la herida está normal" y la herida quedó como
+    DESCONOCIDA en el resumen —un dato contestado que no llegaba—. La coma corta
+    la negación: el "No" no alcanza hasta "normal". "No está normal", pegado, sí
+    niega.
+    """
+
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "No, la herida está normal",
+            "No, la herida está seca y limpia",
+            "No, está normal",
+            "No, todo normal",
+        ],
+    )
+    def test_el_no_con_coma_afirma_el_normal(self, texto: str):
+        assert estado_referido(texto, en_contexto=True) == "normal"
+
+    @pytest.mark.parametrize("texto", ["no está normal", "no la veo normal", "no está roja"])
+    def test_la_negacion_pegada_sigue_negando(self, texto: str):
+        assert estado_referido(texto, en_contexto=True) is None
+
+    def test_la_secrecion_negada_sigue_protegida(self):
+        assert estado_referido("se ve rojita pero nada de pus", en_contexto=True) == "eritema_leve"

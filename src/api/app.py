@@ -263,6 +263,37 @@ def _estado_publico(sesion: SesionLlamada) -> dict:
 # -- Llamada (G4) ----------------------------------------------------------------
 
 
+# Palabras muy frecuentes del español que casi no aparecen en inglés. Bastan
+# para distinguir un fragmento en español de uno en inglés sin una librería de
+# detección de idioma —que sería una dependencia nueva por una heurística simple—.
+_MARCADORES_ES = re.compile(
+    r"\b(que|los|las|del|para|con|una|por|como|está|debe|si|no|su|se|el|la|"
+    r"herida|paciente|cirugía|dolor|días|después)\b"
+)
+
+
+def _parece_espanol(texto: str) -> bool:
+    plano = texto.lower()
+    es = len(_MARCADORES_ES.findall(plano))
+    # "ñ" y vocales acentuadas casi no existen en inglés clínico.
+    tildes = sum(plano.count(c) for c in "áéíóúñ")
+    return (es + tildes) >= 3
+
+
+def _mejor_para_voz(fragmentos: list):
+    """Entre los fragmentos aprobados, prefiere uno en español si su sustento es
+    comparable al mejor. El corpus mezcla idiomas y muchas guías de mama y colon
+    están en inglés; leerle inglés a un paciente hispanohablante es peor que no
+    citar. Se cede como mucho 0,03 de similitud para ganar el idioma."""
+    mejor = fragmentos[0]
+    if _parece_espanol(mejor.texto):
+        return mejor
+    for f in fragmentos:
+        if _parece_espanol(f.texto) and (mejor.similitud - f.similitud) <= 0.03:
+            return f
+    return mejor
+
+
 def _oracion_pertinente(pregunta: str, fragmento: str) -> str:
     """Elige del fragmento la oración que RESPONDE la pregunta, no la primera.
 
@@ -343,7 +374,13 @@ def _consultor_corpus(sesion_ref: list) -> object:
         if not veredicto.permitido or not veredicto.fragmentos:
             return None  # la máquina de turnos dirá el límite declarado
 
-        mejor = veredicto.fragmentos[0]
+        # El paciente habla español y se le va a leer la cita en voz alta. Entre
+        # los fragmentos que la compuerta aprobó, se prefiere uno en español si
+        # su sustento es comparable: leerle "EARLY MOBILIZATION AND ACTIVITY
+        # MANAGEMENT" a un paciente colombiano es peor que no citar. Sigue siendo
+        # cita textual y verificable —no se traduce la guía—, solo se elige la
+        # que el paciente puede entender cuando existe.
+        mejor = _mejor_para_voz(veredicto.fragmentos)
         oracion = _oracion_pertinente(pregunta, mejor.texto)
         return f"Le cuento lo que dice la guía: {oracion}. Eso está en {mejor.cita()}."
 
@@ -590,6 +627,9 @@ async def _procesar_turno(sesion: SesionLlamada, audio: UploadFile) -> JSONRespo
     metrica.registrar_etapa("tts", (time.perf_counter() - t2) * 1000)
 
     metrica.latencia_ms = (time.perf_counter() - inicio) * 1000
+    # El turno que cierra la llamada consolida el resumen esperando al modelo:
+    # su latencia no es la que el paciente percibe y no entra en los percentiles.
+    metrica.es_cierre = respuesta.cierra
     metrica.semaforo = respuesta.decision.semaforo.value
     metrica.escalado = respuesta.escala
     uso_actual = sesion.conversacion.uso_modelo

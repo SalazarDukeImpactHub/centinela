@@ -48,6 +48,12 @@ class TurnoMetrica:
     modelo: str = ""
     escalado: bool = False
     semaforo: str = ""
+    # El turno de cierre CONSOLIDA: espera a que el modelo termine la última
+    # extracción para que el resumen sea fiel. El paciente ya se despidió, así
+    # que no es una latencia conversacional —no está esperando una respuesta
+    # hablada— y no debe contar en los percentiles que el README reporta. Se
+    # registra igual, con su tiempo real, para que la traza siga completa.
+    es_cierre: bool = False
     # Trazabilidad clínica POR TURNO. Sin esto, el registro guardaba números
     # pero no la historia: el semáforo de los primeros turnos se perdía en
     # cuanto cambiaba, y las citas de cada respuesta no quedaban en ninguna
@@ -93,7 +99,11 @@ class RegistroLlamada:
 
     @property
     def latencias(self) -> list[float]:
-        return [t.latencia_ms for t in self.turnos if t.latencia_ms > 0]
+        # El turno de cierre se excluye: mide la consolidación del resumen (que
+        # espera al modelo a propósito), no el tiempo que el paciente aguarda
+        # una respuesta. Incluirlo mezclaba dos cosas distintas y disparaba el
+        # p95 en el turno donde la latencia ya no le importa a nadie.
+        return [t.latencia_ms for t in self.turnos if t.latencia_ms > 0 and not t.es_cierre]
 
     def p50(self) -> float:
         return median(self.latencias) if self.latencias else 0.0

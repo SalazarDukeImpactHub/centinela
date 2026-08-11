@@ -114,6 +114,12 @@ $('btnIniciar').onclick = async () => {
     const d = await r.json();
     llamadaId = d.llamada_id;
 
+    // El rótulo del paciente refleja el escenario elegido: antes decía siempre
+    // "colecistectomía" aunque la llamada fuera de otro tipo de cirugía.
+    if ($('selEscenario') && $('metaPaciente')) {
+      const etiqueta = $('selEscenario').options[$('selEscenario').selectedIndex].text.toLowerCase();
+      $('metaPaciente').textContent = 'datos sintéticos · ' + etiqueta;
+    }
     if ($('selEscenario')) $('selEscenario').disabled = true;
     $('btnIniciar').classList.add('hide');
     $('btnHablar').classList.remove('hide');
@@ -575,10 +581,10 @@ function pintar(d) {
 
   // Métricas
   const m = d.metricas;
-  // Solo se pisa si viene un valor: un turno sin latencia (la apertura, o el
-  // cierre en versiones anteriores) borraba el número que el jurado está
-  // mirando en ese momento.
-  if (d.latencia_ms) $('mUlt').textContent = Math.round(d.latencia_ms) + ' ms';
+  // Solo se pisa si viene un valor y NO es el turno de cierre: ese consolida el
+  // resumen esperando al modelo, y su tiempo —que no es el que el paciente
+  // percibe— pisaba el último turno conversacional con una cifra enorme.
+  if (d.latencia_ms && !d.finalizada) $('mUlt').textContent = Math.round(d.latencia_ms) + ' ms';
   $('mP50').textContent = m.latencia_p50_ms ? Math.round(m.latencia_p50_ms) + ' ms' : '—';
   $('mP95').textContent = m.latencia_p95_ms ? Math.round(m.latencia_p95_ms) + ' ms' : '—';
   $('mTok').textContent = (m.tokens_entrada + m.tokens_salida) || '—';

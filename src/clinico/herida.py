@@ -111,12 +111,19 @@ def _negado(normalizado: str, patron: re.Pattern[str]) -> bool:
     escalaban por una secreción que el paciente estaba negando.
 
     Se busca un negador en los 30 caracteres previos al hallazgo, sin cruzar
-    puntuación fuerte: "no le sale nada" niega, pero "le sale líquido. No tengo
-    fiebre" no niega la secreción.
+    puntuación —incluida la coma—: "no le sale nada" niega, pero "le sale
+    líquido. No tengo fiebre" no niega la secreción.
+
+    La coma corta la negación, y no es un detalle: MEDIDO en llamada real, a
+    "¿la ha visto roja, hinchada o con líquido?" el paciente contestó "No, la
+    herida está normal" —el "No" niega los hallazgos y AFIRMA el normal—, y sin
+    cortar en la coma el "No" alcanzaba hasta "normal" y la herida quedaba como
+    desconocida: un dato clínico contestado que no llegaba al resumen. "No está
+    normal", pegado y sin coma, sí niega.
     """
     for m in patron.finditer(normalizado):
         ventana = normalizado[max(0, m.start() - 30) : m.start()]
-        ventana = re.split(r"[.;]", ventana)[-1]
+        ventana = re.split(r"[.,;]", ventana)[-1]
         if not re.search(r"\b(no|nada de|sin|ni|tampoco|ningun[ao]?)\b", ventana):
             return False  # al menos una aparición NO está negada
     return True
