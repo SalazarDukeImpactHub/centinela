@@ -86,13 +86,33 @@ def niega_fiebre(texto: str) -> bool:
 # "disculpe, no le entendí la temperatura". Entendió perfecto — no hay número
 # porque no hubo termómetro, y eso ya está registrado como fiebre sin medir.
 _SIN_MEDIR = [
-    re.compile(r"\bno (me la|me lo|la|lo) (tome|tomé|medi|medí|he tomado|he medido)"),
-    re.compile(r"\bno (tengo|tenemos|hay|tenia|tenía) termometro"),
+    re.compile(r"\bno (me la|me lo|la|lo) (tome|medi|he tomado|he medido|habia tomado)"),
+    # El paciente no siempre mete el pronombre. En llamada real dijo "no me medí
+    # la temperatura" y el patrón exigía "no me la medí", así que no lo vio.
+    re.compile(r"\bno me (tome|medi|he tomado|he medido)\b"),
+    re.compile(r"\bno (tengo|tenemos|hay|tenia) termometro"),
     re.compile(r"\bsin termometro\b"),
     re.compile(r"\bno me (la )?pude tomar"),
-    re.compile(r"\bno alcance a (tomarme|medirme|tomarla)"),
+    re.compile(r"\bno alcance a (tomarme|medirme|tomarla|tomar)"),
     re.compile(r"\bnunca me la (tome|he tomado)"),
 ]
+
+# Habló de haberse tomado (o no) la temperatura, en cualquier sentido. Aunque no
+# dé la cifra, ESTÁ respondiendo la pregunta: no merece un "no le entendí".
+_HABLA_DE_MEDIRSE = re.compile(
+    r"\b(tome|tomé|medi|medí|tomado|medido|termometro)\b.{0,25}\b(temperatura|fiebre)\b"
+    r"|\b(temperatura|fiebre)\b.{0,25}\b(tome|medi|tomado|medido)\b"
+    # "La tomé", "sí, me la medí": la respuesta corta a "¿se la tomó?". En
+    # llamada real "La tomé." recibió "no le entendí la temperatura".
+    r"|^\s*(si[, ]+)?(me )?la (tome|medi)\b"
+    r"|\btermometro\b"
+)
+
+
+def hablo_de_medirse(texto: str) -> bool:
+    """Mencionó el acto de tomarse la temperatura, con cifra o sin ella."""
+    plano = re.sub(r"[,;]", " ", _normalizar(texto))
+    return bool(_HABLA_DE_MEDIRSE.search(plano)) or no_pudo_medir(texto)
 
 
 def no_pudo_medir(texto: str) -> bool:

@@ -361,9 +361,11 @@ def _aporta_dato(texto: str, foco: Foco | None) -> bool:
             fiebre.tiene_cifra(texto)
             or fiebre.menciona_fiebre(texto)
             or fiebre.niega_fiebre(texto)
-            # "No me la tomé" responde la pregunta: no hay número porque no hubo
-            # termómetro. La fiebre ya quedó registrada como referida sin medir.
-            or fiebre.no_pudo_medir(texto)
+            # Hablar de tomarse la temperatura responde la pregunta, con cifra o
+            # sin ella: "no me la tomé", "la tomé", "no tengo termómetro". En
+            # llamada real, "La tomé." y "pero no me medí la temperatura"
+            # recibieron ambos "disculpe, no le entendí la temperatura".
+            or fiebre.hablo_de_medirse(texto)
             or fiebre.intensidad_referida(texto) is not None
         )
     if foco is Foco.HERIDA:

@@ -37,6 +37,7 @@ from src.modelo.cliente import MODELO, ClienteLocal
 from src.observabilidad.metricas import RegistroLlamada, costo_estimado
 from src.rag.chunk import fragmentar
 from src.rag.extract import extraer as extraer_pdf
+from src.rag import grounding
 from src.rag.grounding import verificar
 from src.rag.index import MODELO_EMBEDDINGS, IndiceClinico
 from src.rag.saneamiento import contiene_inyeccion
@@ -249,6 +250,46 @@ def _estado_publico(sesion: SesionLlamada) -> dict:
 # -- Llamada (G4) ----------------------------------------------------------------
 
 
+def _oracion_pertinente(pregunta: str, fragmento: str) -> str:
+    """Elige del fragmento la oración que RESPONDE la pregunta, no la primera.
+
+    En llamada real, a "¿cuándo me puedo bañar?" el agente leyó "Fugas biliares.
+    Sangrado. Infección. Lesiones en las estructuras cercanas..." —el comienzo
+    de un fragmento que era una lista de complicaciones—. La frase útil, "la
+    herida debe permanecer tapada y seca durante las primeras 48 horas", estaba
+    al final. Leer desde el principio convierte una respuesta en un monólogo, y
+    encima recita complicaciones a un paciente que preguntó otra cosa.
+
+    Se parte el fragmento en oraciones y se elige la que más términos comparte
+    con la pregunta, reusando el mismo emparejamiento bilingüe de la compuerta
+    (bañar↔shower). Si ninguna coincide, se cae a la primera: mejor la de antes
+    que ninguna.
+    """
+    from src.rag import bilingue
+
+    oraciones = [
+        o.strip()
+        for trozo in re.split(r"(?<=[.:])\s+|\n+|•|·|- ", fragmento)
+        for o in [trozo.strip().rstrip(".").strip()]
+        if 15 <= len(o) <= 220
+    ]
+    if not oraciones:
+        return fragmento.split(". ")[0].strip().rstrip(".")
+
+    raices_pregunta = grounding._terminos(pregunta, distintivos=True)
+    en_ingles = bilingue.traducir_consulta(pregunta) or ""
+    raices_pregunta |= grounding._terminos(en_ingles, distintivos=True)
+    if not raices_pregunta:
+        return oraciones[0]
+
+    def solapamiento(oracion: str) -> int:
+        raices = grounding._terminos(oracion, distintivos=False)
+        return len(raices_pregunta & raices)
+
+    mejor = max(oraciones, key=solapamiento)
+    return mejor if solapamiento(mejor) > 0 else oraciones[0]
+
+
 def _consultor_corpus(sesion_ref: list) -> object:
     """Consultor de preguntas del paciente contra el corpus.
 
@@ -283,9 +324,7 @@ def _consultor_corpus(sesion_ref: list) -> object:
             return None  # la máquina de turnos dirá el límite declarado
 
         mejor = veredicto.fragmentos[0]
-        # Solo la primera oración completa: un fragmento de 1.200 caracteres
-        # leído por voz es un monólogo, no una respuesta.
-        oracion = mejor.texto.split(". ")[0].strip().rstrip(".")
+        oracion = _oracion_pertinente(pregunta, mejor.texto)
         return f"Le cuento lo que dice la guía: {oracion}. Eso está en {mejor.cita()}."
 
     return consultar

@@ -421,3 +421,30 @@ class TestNoPudoMedirse:
         r = conv.responder("No me la tomé.")
         assert "no le entendí" not in r.texto.lower()
         assert conv.estado.cuadro.fiebre_referida_sin_medir
+
+
+class TestHabloDeMedirse:
+    """Mencionar el acto de tomarse la temperatura ES responder la pregunta.
+
+    MEDIDO en llamada por voz: a "¿se la tomó?" el paciente contestó "La tomé" y
+    también "no me medí la temperatura" —sin el pronombre—, y ambos recibieron
+    "disculpe, no le entendí la temperatura".
+    """
+
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "La tomé.",
+            "Sí, me la medí",
+            "no me medí la temperatura",
+            "pero no me medí la temperatura",
+            "No me la tomé.",
+            "no tengo termómetro",
+        ],
+    )
+    def test_se_reconoce_como_respuesta(self, texto: str):
+        assert fiebre.hablo_de_medirse(texto)
+
+    @pytest.mark.parametrize("texto", ["no he tenido fiebre", "la herida está roja", "un ocho de dolor"])
+    def test_no_se_confunde(self, texto: str):
+        assert not fiebre.hablo_de_medirse(texto)
