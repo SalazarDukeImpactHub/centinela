@@ -580,3 +580,19 @@ class TestLaAfirmacionConColetilla:
         conv.responder(texto)
         conv.esperar_extraccion()
         assert not conv.estado.cuadro.fiebre_referida_sin_medir, texto
+
+    def test_afirmar_no_recibe_no_le_entendi(self):
+        """El sistema no puede registrar la fiebre y a la vez decir que no entendió.
+
+        MEDIDO: Whisper devolvió "He tenido listos días" —afirmación intacta,
+        coletilla estropeada—. El cuadro registró la fiebre referida y el agente
+        contestó "disculpe, no le entendí la temperatura". Dos cosas opuestas en
+        el mismo turno, y el reintento gastado ahí después hacía falta.
+        """
+        conv, _ = _conversacion()
+        conv.abrir()
+        r = conv.responder("He tenido listos días")
+        conv.esperar_extraccion()
+        assert conv.estado.cuadro.fiebre_referida_sin_medir
+        assert "no le entendí" not in r.texto.lower()
+        assert "temperatura" in r.texto.lower(), "debería pedir la cifra"

@@ -965,6 +965,12 @@ class Conversacion:
             and estado_herida is None  # un estado de herida detectado también
             and nivel_dolor is None
             and estado_movilidad is None
+            # Una afirmación de fiebre YA escribió en el cuadro: el turno aportó
+            # el dato. Sin esto el sistema quedaba diciendo dos cosas opuestas a
+            # la vez —registraba la fiebre referida y le contestaba al paciente
+            # "disculpe, no le entendí la temperatura"—, y el reintento gastado
+            # ahí después faltaba.
+            and not afirma_la_fiebre
             and not _aporta_dato(texto_paciente, foco_respondido_previo)
         )
 
