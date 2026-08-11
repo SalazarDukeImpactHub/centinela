@@ -17,9 +17,11 @@
 
 ![Recall](https://img.shields.io/badge/🔴%20recall%20casos%20rojo-12%2F12%20E2E-critical?style=for-the-badge)
 ![Latencia](https://img.shields.io/badge/⚡%20latencia%20P50-5.1s-blue?style=for-the-badge)
-![Tests](https://img.shields.io/badge/✅%20tests-392-brightgreen?style=for-the-badge)
+![Tests](https://img.shields.io/badge/✅%20tests-409-brightgreen?style=for-the-badge)
 
 **Tech Sphere Challenge 2026** · Source Meridian × AI Thinkers Medellín
+
+Hecho por **Jennifer Salazar Duke** · Salazar Duke Impact Hub
 
 </div>
 
