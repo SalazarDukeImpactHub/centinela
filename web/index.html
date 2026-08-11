@@ -149,6 +149,13 @@ main.call{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 3
     </div>
 
     <div style="flex:none;display:flex;align-items:center;gap:10px;padding:11px 18px;border-top:1px solid var(--line);background:var(--panel)">
+      <select id="selEscenario" class="mono" title="Tipo de cirugía del paciente" style="padding:8px 10px;border:1px solid var(--line-2);background:var(--panel-2);color:var(--text);border-radius:var(--r1);font-size:12px">
+        <option value="cholecystitis">Vesícula (colecistectomía)</option>
+        <option value="Appendicitis">Apendicectomía</option>
+        <option value="colorectal cancer">Cáncer colorrectal</option>
+        <option value="total joint replacement">Reemplazo articular</option>
+        <option value="breast_cancer">Mastectomía (mama)</option>
+      </select>
       <button id="btnIniciar" class="btn btn-pri">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M3 3.6c0-.7.6-1.3 1.3-1.3h1.5c.5 0 1 .4 1.1.9l.5 2c.1.4 0 .9-.4 1.1l-1 .7a9 9 0 003.9 4l.7-1c.3-.3.7-.5 1.1-.4l2 .5c.5.1.9.6.9 1.1v1.5c0 .7-.6 1.3-1.3 1.3A11.6 11.6 0 013 3.6z" fill="#fff"/></svg>
         Iniciar llamada

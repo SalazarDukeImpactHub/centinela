@@ -105,11 +105,16 @@ $('btnIniciar').onclick = async () => {
   $('btnIniciar').disabled = true;
   $('btnIniciar').textContent = 'Iniciando…';
   try {
-    const r = await fetch('/api/llamada', { method: 'POST' });
+    // El escenario elige el corpus del paciente: un paciente de mama no recibe
+    // literatura de vesícula, y la demo de conocimiento vivo puede correr sobre
+    // el hueco real del corpus de mama.
+    const escenario = $('selEscenario') ? $('selEscenario').value : 'cholecystitis';
+    const r = await fetch('/api/llamada?escenario=' + encodeURIComponent(escenario), { method: 'POST' });
     if (!r.ok) throw new Error(await r.text());
     const d = await r.json();
     llamadaId = d.llamada_id;
 
+    if ($('selEscenario')) $('selEscenario').disabled = true;
     $('btnIniciar').classList.add('hide');
     $('btnHablar').classList.remove('hide');
     $('btnColgar').classList.remove('hide');
@@ -434,6 +439,7 @@ function finalizar() {
   $('btnIniciar').classList.remove('hide');
   $('btnIniciar').disabled = false;
   $('btnIniciar').textContent = 'Nueva llamada';
+  if ($('selEscenario')) $('selEscenario').disabled = false;
   $('notaAudio').textContent = 'Audio inactivo';
   estado('Llamada finalizada', 'Sesión cerrada', 'var(--text-3)');
   llamadaId = null;

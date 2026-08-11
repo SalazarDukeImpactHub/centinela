@@ -53,6 +53,19 @@ WEB = RAIZ / "web"
 # Escenario por defecto de la demo. En producción vendría del perfil del paciente.
 ESCENARIO_DEMO = "cholecystitis"
 
+# Los cinco cuadros del dataset, tal como quedan etiquetados en el índice. La
+# llamada puede arrancar en cualquiera de ellos: el grounding filtra por él, así
+# que un paciente de mama no recibe literatura de vesícula. Es también lo que
+# hace posible la demo de conocimiento vivo (G5) sobre el hueco real del corpus
+# de mama —ver docs/demo/README.md—.
+ESCENARIOS_VALIDOS = {
+    "cholecystitis": "Colecistectomía (vesícula)",
+    "Appendicitis": "Apendicectomía",
+    "colorectal cancer": "Cáncer colorrectal",
+    "total joint replacement": "Reemplazo articular",
+    "breast_cancer": "Mastectomía (mama)",
+}
+
 app = FastAPI(title="Centinela — seguimiento posoperatorio", version="0.1")
 
 
@@ -302,7 +315,14 @@ def _consultor_corpus(sesion_ref: list) -> object:
     def consultar(pregunta: str) -> str | None:
         if SERVICIOS.indice is None:
             return None
-        veredicto = verificar(SERVICIOS.indice, pregunta, escenario=ESCENARIO_DEMO)
+        # El escenario sale de la llamada en curso, no de una constante: si el
+        # paciente es de mama, se busca en el corpus de mama. Antes esto estaba
+        # fijo en vesícula y la consola de conocimiento (G5) no podía citar un
+        # documento subido para otro escenario.
+        escenario = ESCENARIO_DEMO
+        if sesion_ref:
+            escenario = sesion_ref[0].conversacion.estado.escenario
+        veredicto = verificar(SERVICIOS.indice, pregunta, escenario=escenario)
         # El estado de grounding queda registrado para la consola, responda o no.
         if sesion_ref:
             sesion = sesion_ref[0]
@@ -331,16 +351,24 @@ def _consultor_corpus(sesion_ref: list) -> object:
 
 
 @app.post("/api/llamada")
-async def iniciar_llamada() -> JSONResponse:
-    """Crea una llamada y devuelve el saludo del agente ya sintetizado."""
+async def iniciar_llamada(escenario: str = ESCENARIO_DEMO) -> JSONResponse:
+    """Crea una llamada y devuelve el saludo del agente ya sintetizado.
+
+    `escenario` elige el corpus del paciente. Por defecto vesícula, para no
+    cambiar el comportamiento de quien no lo pasa.
+    """
     if SERVICIOS.cliente is None:
         raise HTTPException(503, "servicio no inicializado")
+    if escenario not in ESCENARIOS_VALIDOS:
+        raise HTTPException(
+            400, f"escenario no válido; use uno de: {', '.join(ESCENARIOS_VALIDOS)}"
+        )
 
     llamada_id = uuid.uuid4().hex[:12]
     sesion_ref: list = []
     conversacion = Conversacion(
         SERVICIOS.cliente,
-        EstadoLlamada(escenario=ESCENARIO_DEMO),
+        EstadoLlamada(escenario=escenario),
         consultor=_consultor_corpus(sesion_ref),
     )
     sesion = SesionLlamada(
@@ -885,6 +913,7 @@ async def salud() -> JSONResponse:
             # saludo es síntesis local y la transcripción necesita credencial.
             "transcripcion_lista": not ausentes,
             "faltantes": list(ausentes),
+            "escenarios": ESCENARIOS_VALIDOS,
         }
     )
 
