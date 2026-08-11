@@ -96,8 +96,16 @@ _SIN_MEDIR = [
 
 
 def no_pudo_medir(texto: str) -> bool:
-    """Dijo que no se tomó la temperatura. Responde la pregunta: no hay cifra."""
-    normalizado = _normalizar(texto)
+    """Dijo que no se tomó la temperatura. Responde la pregunta: no hay cifra.
+
+    Se quita la puntuación antes de comparar porque Whisper la inventa: la misma
+    frase volvió como "No me la tomé." una vez y con una coma después del "no"
+    la siguiente. Una coma no cambia lo que el paciente quiso decir, y hacer
+    depender una decisión clínica de dónde el transcriptor puso una pausa es
+    frágil justo donde no conviene serlo.
+    """
+    normalizado = re.sub(r"[,;]", " ", _normalizar(texto))
+    normalizado = re.sub(r"\s+", " ", normalizado)
     return any(p.search(normalizado) for p in _SIN_MEDIR)
 
 
