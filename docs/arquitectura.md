@@ -204,6 +204,8 @@ flowchart LR
 | Minimización sistemática | código | el minimizador reporta verde con cuadro rojo; la señal está en CÓMO habla |
 | Orden de las preguntas | código | el agente preguntaba por la herida a quien acababa de describírsela |
 | Ancla de las palabras laxas | código | *"no muy bien la verdad"* registraba la **herida como normal** |
+| Tema propio del paciente | código | *"no me quitan el drenaje"* recibía *"no le entendí la temperatura"* |
+| Negación como dato | código | el resumen decía *"quedó sin preguntar: fiebre"* a quien la había negado |
 
 **Resultado:** el modelo de lenguaje quedó reducido a lo que hace bien —entender
 cómo habla la gente— y ninguna de sus fallas puede llegar al registro clínico.
@@ -220,5 +222,5 @@ cómo habla la gente— y ninguna de sus fallas puede llegar al registro clínic
 | Defensa contra inyección | `pytest tests/test_saneamiento.py` | 14 ataques bloqueados |
 | Dataset contra el kit | `pytest tests/test_dataset.py` | 20 afirmaciones verificadas |
 | Levantamiento (G2) | `docker compose up` | **6 min 07 s** de 15 |
-| Suite completa | `pytest tests/` | **343 pruebas** |
+| Suite completa | `pytest tests/` | **350 pruebas** |
 | Reranker cruzado (descartado) | `python scripts/experimento_reranker.py` | +300 % de latencia, 0/7 aciertos |

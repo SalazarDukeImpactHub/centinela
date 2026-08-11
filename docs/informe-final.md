@@ -212,6 +212,28 @@ Medido sobre los 160 casos de la capa ruidosa: recall en rojo **12/12** y verdes
 sobre-escalados **57/123**, contra 61/123 antes del cambio. La conversación se
 volvió más corta y más precisa a la vez.
 
+**Dos fallas más, encontradas ejecutando una llamada completa contra la API real
+—con transcripción de Whisper, no con texto simulado—:**
+
+El paciente abrió con *«no me quitan el drenaje y eso me tiene preocupada»* y
+recibió *«disculpe, no le entendí la temperatura»*. Le había entendido perfecto:
+hablaba de otra cosa. El drenaje no es ninguno de los cuatro focos, así que no
+entraba por la regla 2. Ahora se le reconoce lo que trajo —queda anotado para el
+equipo, textual— y se repite la pregunta sin tratarlo como si no se hubiera
+explicado. Si insiste sin responder, vuelve el reintento normal: reconocer no es
+un bucle.
+
+Y el resumen le informaba al equipo *«quedó sin preguntar: fiebre»* sobre un
+paciente que había contestado *«fiebre no he tenido, nada»*. El campo se
+consideraba faltante por no tener cifra. **Negar es contestar**: decirle a quien
+recibe la alerta que un tema quedó sin explorar cuando sí se exploró es peor que
+no decir nada. La negación se registra como el dato que es.
+
+Las inquietudes, además, ahora se muestran en la consola —el resumen que ve el
+equipo clínico— y no solo en el JSON. Se renderizan textuales y escapadas, como
+el resto de la transcripción: se verificó que una carga inyectada en el habla del
+paciente llega a pantalla como texto y no como marcado.
+
 ### Qué cambiaría con más tiempo
 
 1. **Traducción completa del corpus**, no solo de la consulta. El diccionario
@@ -323,4 +345,4 @@ vocabulario de norma.
 | Recall en rojo — pipeline conversacional completo | 12/12, **ninguno cae a verde** |
 | Verdes sobre-escalados (capa ruidosa) | 57/123 |
 | Costo estimado por llamada | ~US$ 0,0006 |
-| Suite de pruebas | 343 |
+| Suite de pruebas | 350 |

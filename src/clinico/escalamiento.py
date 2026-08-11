@@ -81,14 +81,24 @@ class CuadroClinico:
     # es una señal sobre CÓMO reporta el paciente, y por eso solo pondera
     # hallazgos ya detectados — nunca crea uno.
     marcadores_minimizacion: int = 0
+    # El paciente NEGÓ la fiebre. Es un dato, no un vacío: sin esto el resumen
+    # informaba «quedó sin preguntar: fiebre» a quien recibe la alerta, sobre un
+    # paciente que había contestado «fiebre no he tenido, nada». Decirle al
+    # equipo clínico que un tema quedó sin explorar cuando sí se exploró es peor
+    # que no decir nada.
+    fiebre_negada: bool = False
 
     @property
     def campos_faltantes(self) -> list[str]:
-        """Qué falta preguntar para poder decidir con fundamento."""
+        """Qué falta preguntar para poder decidir con fundamento.
+
+        Falta lo que NO SE SABE, no lo que no tiene número: una fiebre negada es
+        una respuesta cerrada aunque no deje una cifra.
+        """
         faltan = []
         if self.dolor_nrs is None:
             faltan.append("dolor")
-        if self.fiebre_c is None:
+        if self.fiebre_c is None and not self.fiebre_negada:
             faltan.append("fiebre")
         if self.herida is Herida.DESCONOCIDO:
             faltan.append("herida")

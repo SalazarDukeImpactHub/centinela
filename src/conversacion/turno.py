@@ -425,6 +425,13 @@ def _eco(texto_paciente: str, cifra_dicha: float | None, foco: Foco | None) -> s
 # de seguir preguntando: pasar de largo suena a formulario.
 ACUSE_PREOCUPACION = "Entiendo su preocupación, y hace bien en contármelo."
 
+# Acuse cuando el paciente trae un tema propio en vez de responder la pregunta.
+# Le entendió: hablaba de otra cosa. Decirle "no le entendí la temperatura" es
+# tratarlo como si no se hubiera explicado.
+ACUSE_INQUIETUD = (
+    "Eso se lo anoto tal cual para el equipo, que se lo resuelvan bien."
+)
+
 # Acuse específico cuando el paciente reporta escalofríos y no fiebre. Nombrar
 # lo que efectivamente dijo, en vez de responder como si hubiera dicho "fiebre",
 # es lo que hace que la conversación se sienta escuchada: los escalofríos son un
@@ -666,11 +673,13 @@ class Conversacion:
         # Inquietud propia: el paciente trae un tema que nadie le preguntó.
         # Se registra tal cual lo dijo, sin interpretarlo, para que el equipo
         # que reciba la alerta lea sus palabras y no un resumen de ellas.
+        trajo_inquietud = False
         if _es_inquietud(texto_paciente, self.estado.foco_actual):
             with self._lock:
                 dicho = texto_paciente.strip()
                 if dicho not in self.estado.inquietudes:
                     self.estado.inquietudes.append(dicho)
+                    trajo_inquietud = True
 
         detectadas = alarmas.detectar(texto_paciente)
         if detectadas:
@@ -783,9 +792,11 @@ class Conversacion:
                 self.estado.cuadro.fiebre_referida_sin_medir = True
                 self.estado.dar_por_cubierto(Foco.FIEBRE)
         elif fiebre.niega_fiebre(texto_paciente):
-            # Negar es contestar. "No he tenido fiebre" deja el tema cerrado
-            # aunque no escriba nada en el cuadro.
+            # Negar es contestar. "No he tenido fiebre" deja el tema cerrado, y
+            # queda registrado como negación: si no, el resumen le informaba al
+            # equipo que la fiebre había quedado sin preguntar.
             with self._lock:
+                self.estado.cuadro.fiebre_negada = True
                 self.estado.dar_por_cubierto(Foco.FIEBRE)
 
         # Intensidad dicha en palabras cuando se pidió el número: "Mucho."
@@ -955,6 +966,31 @@ class Conversacion:
             with self._lock:
                 self.estado.preguntados.discard(foco_respondido_previo)
                 self.estado.repreguntados.add(foco_respondido_previo)
+
+        # 3b-ter. El paciente trajo una preocupación propia en vez de responder.
+        #     MEDIDO en llamada completa por la API: abrió con «no me quitan el
+        #     drenaje y eso me tiene preocupada» y recibió «disculpe, no le
+        #     entendí la temperatura». Le entendió perfecto — hablaba de otra
+        #     cosa. Se le reconoce lo que trajo y se repite la pregunta sin
+        #     tratarlo como si no se hubiera explicado. Solo la PRIMERA vez que
+        #     trae ese tema: si insiste sin responder, vuelve el reintento normal.
+        if (
+            sin_responder_lo_preguntado
+            and trajo_inquietud
+            and not cambio_de_tema
+            and not prefijo
+        ):
+            variante = _elegir(PREGUNTAS[foco_respondido_previo])
+            texto = f"{anuncio_alerta}{ACUSE_INQUIETUD} {variante}"
+            self.estado.transcripcion.append(("agente", texto))
+            return RespuestaTurno(
+                texto=texto,
+                decision=decision,
+                escala=decision.escala,
+                cierra=False,
+                foco=foco_respondido_previo,
+                alarmas_detectadas=detectadas,
+            )
 
         if (
             sin_responder_lo_preguntado

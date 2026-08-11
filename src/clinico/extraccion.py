@@ -166,6 +166,10 @@ def _fusionar(previo: CuadroClinico, nuevo: dict) -> CuadroClinico:
         # marcadores de minimización se acumulan durante toda la llamada y
         # quedaban en cero, dejando la regla sin efecto.
         marcadores_minimizacion=previo.marcadores_minimizacion,
+        # Se arrastra por el mismo motivo: sin esto, la primera extracción tras
+        # la negación borraba el dato y el resumen volvía a decir que la fiebre
+        # había quedado sin preguntar.
+        fiebre_negada=previo.fiebre_negada and fiebre_final is None,
     )
 
 

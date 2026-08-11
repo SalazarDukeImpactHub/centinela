@@ -439,3 +439,77 @@ class TestMovilidadNoSeInventa:
         conv.responder("la veo bien")
         conv.esperar_extraccion()
         assert Foco.MOVILIDAD not in conv.estado.preguntados
+
+
+class TestElPacienteTraeSuTemaEnVezDeResponder:
+    """MEDIDO en llamada completa por la API, con Whisper real.
+
+    El paciente abrió con "no me quitan el drenaje y eso me tiene preocupada" y
+    recibió "disculpe, no le entendí la temperatura". Le entendió perfecto:
+    hablaba de otra cosa. Es la misma sordera que el cambio de tema, con un
+    disparador distinto — el drenaje no es ninguno de los cuatro focos.
+    """
+
+    def test_no_dice_que_no_entendio_lo_que_entendio(self):
+        from src.conversacion.turno import ACUSE_INQUIETUD
+
+        conv, _ = _conversacion()
+        conv.abrir()
+        r = conv.responder("Doctora, no me quitan el drenaje y eso me tiene preocupada.")
+        assert "no le entendí" not in r.texto.lower()
+        assert ACUSE_INQUIETUD in r.texto
+
+    def test_repite_la_pregunta_sin_perder_el_foco(self):
+        conv, _ = _conversacion()
+        conv.abrir()
+        foco = conv.estado.foco_actual
+        r = conv.responder("Doctora, no me quitan el drenaje y eso me tiene preocupada.")
+        assert r.foco is foco
+
+    def test_si_insiste_sin_responder_vuelve_el_reintento(self):
+        """Reconocer lo que trajo no es un bucle: la inquietud se acusa una vez."""
+        conv, _ = _conversacion()
+        conv.abrir()
+        conv.responder("Doctora, no me quitan el drenaje y eso me tiene preocupada.")
+        conv.esperar_extraccion()
+        r = conv.responder("Doctora, no me quitan el drenaje y eso me tiene preocupada.")
+        assert "no le entendí" in r.texto.lower()
+
+
+class TestLaFiebreNegadaNoEsUnVacio:
+    """El resumen informaba "quedó sin preguntar: fiebre" sobre un paciente que
+    había contestado "fiebre no he tenido, nada".
+
+    Decirle al equipo clínico que un tema quedó sin explorar cuando sí se
+    exploró es peor que no decir nada.
+    """
+
+    def test_negar_la_fiebre_cierra_el_tema(self):
+        conv, _ = _conversacion()
+        conv.abrir()
+        conv.responder("Fiebre no he tenido, nada.")
+        conv.esperar_extraccion()
+        assert conv.estado.cuadro.fiebre_negada
+        assert "fiebre" not in conv.estado.cuadro.campos_faltantes
+
+    def test_no_haber_preguntado_si_deja_el_hueco(self):
+        from src.clinico.escalamiento import CuadroClinico
+
+        assert "fiebre" in CuadroClinico().campos_faltantes
+
+    def test_la_negacion_sobrevive_a_la_extraccion(self):
+        """La fusión construye un cuadro nuevo: lo que no se arrastra se pierde."""
+        from src.clinico.escalamiento import CuadroClinico
+        from src.clinico.extraccion import _fusionar
+
+        previo = CuadroClinico(fiebre_negada=True)
+        assert _fusionar(previo, {}).fiebre_negada
+
+    def test_pero_una_cifra_posterior_manda(self):
+        from src.clinico.escalamiento import CuadroClinico
+        from src.clinico.extraccion import _fusionar
+
+        previo = CuadroClinico(fiebre_negada=True)
+        fusionado = _fusionar(previo, {"fiebre_c": 38.5})
+        assert not fusionado.fiebre_negada
+        assert "fiebre" not in fusionado.campos_faltantes
