@@ -80,6 +80,27 @@ def niega_fiebre(texto: str) -> bool:
     return any(p.search(normalizado) for p in _NEGACIONES)
 
 
+# Formas en que el paciente dice que NO PUDO medirse la temperatura. Es una
+# respuesta, no una evasión: MEDIDO en llamada por voz contra el contenedor, a
+# "¿se alcanzó a tomar la temperatura?" contestó "No me la tomé" y recibió
+# "disculpe, no le entendí la temperatura". Entendió perfecto — no hay número
+# porque no hubo termómetro, y eso ya está registrado como fiebre sin medir.
+_SIN_MEDIR = [
+    re.compile(r"\bno (me la|me lo|la|lo) (tome|tomé|medi|medí|he tomado|he medido)"),
+    re.compile(r"\bno (tengo|tenemos|hay|tenia|tenía) termometro"),
+    re.compile(r"\bsin termometro\b"),
+    re.compile(r"\bno me (la )?pude tomar"),
+    re.compile(r"\bno alcance a (tomarme|medirme|tomarla)"),
+    re.compile(r"\bnunca me la (tome|he tomado)"),
+]
+
+
+def no_pudo_medir(texto: str) -> bool:
+    """Dijo que no se tomó la temperatura. Responde la pregunta: no hay cifra."""
+    normalizado = _normalizar(texto)
+    return any(p.search(normalizado) for p in _SIN_MEDIR)
+
+
 def menciona_fiebre(texto: str) -> bool:
     """El paciente describe sensación febril, con la palabra que sea.
 

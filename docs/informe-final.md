@@ -362,4 +362,4 @@ vocabulario de norma.
 | Recall en rojo — pipeline conversacional completo | 12/12, **ninguno cae a verde** |
 | Verdes sobre-escalados (capa ruidosa) | 57/123 |
 | Costo estimado por llamada | ~US$ 0,0006 |
-| Suite de pruebas | 379 |
+| Suite de pruebas | 390 |

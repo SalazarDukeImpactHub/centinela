@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from src.clinico import fiebre
 from src.clinico.escalamiento import CuadroClinico, Semaforo, evaluar
 from src.clinico.fiebre import menciona_fiebre, refiere_fiebre_sin_cifra, tiene_cifra
 from src.conversacion.turno import (
@@ -373,4 +374,50 @@ class TestTopeDeReintentosDeCifra:
         for texto in ["75 grados", "200 grados", "1000 grados"]:
             conv.responder(texto)
             conv.esperar_extraccion()
+        assert conv.estado.cuadro.fiebre_referida_sin_medir
+
+
+class TestNoPudoMedirse:
+    """Decir que no se tomó la temperatura ES responder la pregunta.
+
+    MEDIDO en llamada por voz contra el contenedor: a "¿se alcanzó a tomar la
+    temperatura?" el paciente contestó "No me la tomé" y recibió "disculpe, no
+    le entendí la temperatura". Entendió perfecto — no hay número porque no hubo
+    termómetro, y la fiebre ya estaba registrada como referida sin medir.
+    """
+
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "No me la tomé.",
+            "no me la tome",
+            "no me la he tomado",
+            "no tengo termómetro",
+            "sin termómetro en la casa",
+            "no alcancé a tomarme la temperatura",
+        ],
+    )
+    def test_se_reconoce_como_respuesta(self, texto: str):
+        assert fiebre.no_pudo_medir(texto)
+
+    @pytest.mark.parametrize("texto", ["38 y medio", "no he tenido fiebre", "me la tomé y dio 37"])
+    def test_no_se_confunde_con_otras_respuestas(self, texto: str):
+        assert not fiebre.no_pudo_medir(texto)
+
+    def test_la_conversacion_avanza_en_vez_de_repreguntar(self):
+        import json as _json
+
+        from src.conversacion.turno import Conversacion, EstadoLlamada
+        from src.modelo.cliente import Respuesta
+
+        class ClienteFalso:
+            def generar(self, prompt, **kwargs):  # noqa: ANN001, ANN003
+                return Respuesta(_json.dumps({}), 10, 5, 1.0, "falso")
+
+        conv = Conversacion(ClienteFalso(), EstadoLlamada(escenario="breast_cancer"))
+        conv.abrir()
+        conv.responder("Sí he tenido escalofríos estos días.")
+        conv.esperar_extraccion()
+        r = conv.responder("No me la tomé.")
+        assert "no le entendí" not in r.texto.lower()
         assert conv.estado.cuadro.fiebre_referida_sin_medir

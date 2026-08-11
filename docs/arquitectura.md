@@ -222,5 +222,5 @@ cómo habla la gente— y ninguna de sus fallas puede llegar al registro clínic
 | Defensa contra inyección | `pytest tests/test_saneamiento.py` | 14 ataques bloqueados |
 | Dataset contra el kit | `pytest tests/test_dataset.py` | 20 afirmaciones verificadas |
 | Levantamiento (G2) | `docker compose up` | **6 min 07 s** de 15 |
-| Suite completa | `pytest tests/` | **379 pruebas** |
+| Suite completa | `pytest tests/` | **390 pruebas** |
 | Reranker cruzado (descartado) | `python scripts/experimento_reranker.py` | +300 % de latencia, 0/7 aciertos |
